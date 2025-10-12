@@ -3,8 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
 import { Briefcase, Users, Search, LogOut, Plus, Loader } from 'lucide-react';
 
-const AdminDashboard = () => {
-  const { user, logout } = useAuth();
+const Dashboard = () => {
+  const { admin, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('jobs');
   const [jobs, setJobs] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -89,15 +89,29 @@ const AdminDashboard = () => {
     }
   };
 
+  const getMatchColor = (score) => {
+    if (score >= 80) return 'text-green-600';
+    if (score >= 60) return 'text-yellow-600';
+    if (score >= 40) return 'text-orange-600';
+    return 'text-red-600';
+  };
+
+  const getMatchBgColor = (score) => {
+    if (score >= 80) return 'bg-green-600';
+    if (score >= 60) return 'bg-yellow-600';
+    if (score >= 40) return 'bg-orange-600';
+    return 'bg-red-600';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <nav className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <h1 className="text-2xl font-bold text-purple-600">Admin Portal</h1>
+            <h1 className="text-2xl font-bold text-purple-600">Admin Portal - Spherical</h1>
             <div className="flex items-center space-x-4">
-              <span className="text-gray-700">{user?.name}</span>
+              <span className="text-gray-700">{admin?.name}</span>
               <button
                 onClick={logout}
                 className="flex items-center text-red-600 hover:text-red-700"
@@ -323,7 +337,7 @@ const AdminDashboard = () => {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="e.g., user with experience in management systems"
+                  placeholder="e.g., candidate with experience in machine learning and python"
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                   required
                 />
@@ -363,14 +377,14 @@ const AdminDashboard = () => {
                         {result.experience && (
                           <div className="mt-2">
                             <p className="text-sm font-medium text-gray-700">Experience:</p>
-                            <p className="text-gray-600">{result.experience}</p>
+                            <p className="text-gray-600 text-sm">{result.experience}</p>
                           </div>
                         )}
 
                         {result.education && (
                           <div className="mt-2">
                             <p className="text-sm font-medium text-gray-700">Education:</p>
-                            <p className="text-gray-600">{result.education}</p>
+                            <p className="text-gray-600 text-sm">{result.education}</p>
                           </div>
                         )}
 
@@ -385,7 +399,7 @@ const AdminDashboard = () => {
                       <div className="ml-4 text-right">
                         <div className="mb-2">
                           <span className="text-xs font-medium text-gray-500">Final Score</span>
-                          <div className="text-3xl font-bold text-purple-600">
+                          <div className={`text-3xl font-bold ${getMatchColor(result.final_score)}`}>
                             {result.final_score}%
                           </div>
                         </div>
@@ -405,7 +419,7 @@ const AdminDashboard = () => {
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div
-                            className="bg-blue-600 h-2 rounded-full"
+                            className={`h-2 rounded-full ${getMatchBgColor(result.vector_score)}`}
                             style={{ width: `${result.vector_score}%` }}
                           />
                         </div>
@@ -417,7 +431,7 @@ const AdminDashboard = () => {
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div
-                            className="bg-green-600 h-2 rounded-full"
+                            className={`h-2 rounded-full ${getMatchBgColor(result.ai_relevancy)}`}
                             style={{ width: `${result.ai_relevancy}%` }}
                           />
                         </div>
@@ -434,4 +448,4 @@ const AdminDashboard = () => {
   );
 };
 
-export default AdminDashboard;
+export default Dashboard;

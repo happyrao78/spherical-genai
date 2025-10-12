@@ -52,12 +52,12 @@ const Home = () => {
               >
                 Candidate Login
               </Link>
-              <Link
+              {/* <Link
                 to="/admin/login"
                 className="text-gray-700 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium"
               >
                 Admin Login
-              </Link>
+              </Link> */}
             </div>
           </div>
         </div>

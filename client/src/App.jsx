@@ -4,8 +4,8 @@ import Home from './pages/Home';
 import CandidateLogin from './pages/CandidateLogin';
 import CandidateSignup from './pages/CandidateSignup';
 import CandidateDashboard from './pages/CandidateDashboard';
-import AdminLogin from './pages/AdminLogin';
-import AdminDashboard from './pages/AdminDashboard';
+// import AdminLogin from './pages/AdminLogin';
+// import AdminDashboard from './pages/AdminDashboard';
 import './index.css';
 
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -38,7 +38,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin/login" element={<AdminLogin />} />
+          {/* <Route path="/admin/login" element={<AdminLogin />} />
           <Route
             path="/admin/dashboard"
             element={
@@ -46,7 +46,7 @@ function App() {
                 <AdminDashboard />
               </ProtectedRoute>
             }
-          />
+          /> */}
         </Routes>
       </BrowserRouter>
     </AuthProvider>

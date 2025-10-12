@@ -47,4 +47,20 @@ router.post('/:id/apply', protect, async (req, res) => {
   }
 });
 
+// Get user's applications (check which jobs already applied)
+router.get('/my-applications', protect, async (req, res) => {
+  try {
+    const applications = await Application.find({ candidate: req.user._id })
+      .select('job')
+      .lean();
+    
+    // Return just job IDs that user has applied to
+    const appliedJobIds = applications.map(app => app.job.toString());
+    
+    res.json({ appliedJobIds });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 module.exports = router;
