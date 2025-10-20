@@ -20,11 +20,23 @@ load_dotenv()
 
 app = FastAPI()
 
+# --- Start Debugging: Check Cloudinary Config ---
+print("--- Cloudinary Configuration ---")
+cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
+api_key = os.getenv("CLOUDINARY_API_KEY")
+api_secret = os.getenv("CLOUDINARY_API_SECRET")
+
+print(f"Cloud Name: {'Loaded' if cloud_name else 'Not Found'}")
+print(f"API Key: {'Loaded' if api_key else 'Not Found'}")
+print(f"API Secret: {'Loaded' if api_secret else 'Not Found'}")
+print("---------------------------------")
+# --- End Debugging ---
+
 # Configure Cloudinary
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    cloud_name=cloud_name,
+    api_key=api_key,
+    api_secret=api_secret,
 )
 
 
@@ -82,48 +94,75 @@ async def upload_resume(
     resume: UploadFile = File(...),
     authorization: str = Header(None)
 ):
+    print("\n--- Received request to /api/upload-resume ---")
     user_id = verify_token(authorization)
     if not user_id:
+        print("[DEBUG] Unauthorized access detected.")
         raise HTTPException(status_code=401, detail="Unauthorized")
     
+    print(f"[DEBUG] User authenticated: {user_id}")
+    
     file_path = TEMP_DIR / resume.filename
+    print(f"[DEBUG] Temporary file path: {file_path}")
     
     try:
+        # Save the file locally first
         with open(file_path, "wb") as f:
             content = await resume.read()
             f.write(content)
+        print(f"[DEBUG] File '{resume.filename}' saved locally.")
             
         # Upload to Cloudinary
+        print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
             resource_type="auto",
             folder="resumes"
         )
+        
+        print("\n--- Cloudinary Upload Result ---")
+        print(upload_result)
+        print("--------------------------------\n")
+        
         resume_url = upload_result.get("secure_url")
 
         if not resume_url:
+            print("[DEBUG] ERROR: 'secure_url' not found in Cloudinary response.")
             raise HTTPException(status_code=500, detail="Could not upload resume to cloud storage.")
 
-        # Process resume
+        print(f"[DEBUG] Resume URL from Cloudinary: {resume_url}")
+
+        # Process resume text
         extracted_data = process_resume(str(file_path))
         extracted_data["resume_url"] = resume_url
+        print("[DEBUG] Resume processed successfully.")
         
         # Store in vector DB
         vector_db.upsert_candidate(user_id, extracted_data)
+        print("[DEBUG] Candidate data upserted to vector DB.")
         
-        # Save profile
+        # Save profile to MongoDB
         profile_manager.create_or_update_profile(user_id, extracted_data)
+        print("[DEBUG] Profile saved to MongoDB.")
         
+        print("--- Resume upload process completed successfully ---\n")
         return {"message": "Resume processed successfully", "data": extracted_data}
+        
     except Exception as e:
+        print(f"\n--- AN ERROR OCCURRED ---")
+        print(f"Exception Type: {type(e).__name__}")
+        print(f"Error Details: {e}")
+        print("--------------------------\n")
         raise HTTPException(status_code=500, detail=f"Error processing resume: {str(e)}")
+        
     finally:
-        # Clean up - delete file
+        # Clean up the temporary file
         try:
             if file_path.exists():
                 file_path.unlink()
+                print(f"[DEBUG] Temporary file '{file_path}' deleted.")
         except Exception as e:
-            print(f"Error deleting file: {e}")
+            print(f"[DEBUG] Error deleting temporary file: {e}")
 
 
 @app.get("/api/profile")

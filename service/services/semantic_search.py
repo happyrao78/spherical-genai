@@ -55,7 +55,7 @@ class SemanticSearch:
                 "experience": profile.get('experience', '')[:200],  # Preview
                 "education": profile.get('education', ''),
                 "years_experience": profile.get('years_of_experience', ''),
-                "resume_url": profile.get('resume_url', ''), # Add this line
+                "resume_url": profile.get('resume_url', ''), # This line was missing
                 "vector_score": round(similarity_score * 100, 2),
                 "ai_relevancy": relevancy_score,
                 "final_score": round(combined_score * 100, 2),
