@@ -1,5 +1,5 @@
 from pymongo import MongoClient
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import os
 
 class ProfileManager:
@@ -44,3 +44,15 @@ class ProfileManager:
             {"$set": updates}
         )
         return self.get_profile(user_id)
+    
+    def get_all_profile_user_ids(self) -> List[str]:
+            """Get all distinct user_ids from the profiles collection using distinct()"""
+            try:
+                # Use distinct to get unique user_ids directly from the database
+                user_ids = self.profiles.distinct("user_id")
+                # Ensure all items are strings (distinct might return other types if schema is loose)
+                return [str(uid) for uid in user_ids if uid is not None]
+            except Exception as e:
+                print(f"Error fetching distinct user_ids: {e}")
+                return [] # Return empty list on error
+

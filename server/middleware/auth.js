@@ -27,3 +27,14 @@ exports.adminOnly = (req, res, next) => {
     res.status(403).json({ message: 'Admin access only' });
   }
 };
+
+
+
+exports.superAdminOnly = (req, res, next) => {
+  // Check if user is logged in, is an admin, AND email matches the super admin email
+  if (req.user && req.user.role === 'admin' && req.user.email === process.env.ADMIN_EMAIL) {
+    next();
+  } else {
+    res.status(403).json({ message: 'Super admin access only' });
+  }
+};

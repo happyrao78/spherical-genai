@@ -1,16 +1,18 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
 
 from services.auth import verify_token
 from services.resume_processor import process_resume
 from services.vector_db import VectorDB
 from services.profile_manager import ProfileManager
 from services.semantic_search import SemanticSearch
+
 
 load_dotenv()
 
@@ -25,14 +27,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Create temp folder
 TEMP_DIR = Path("temp")
 TEMP_DIR.mkdir(exist_ok=True)
+
 
 # Initialize services
 vector_db = VectorDB()
 profile_manager = ProfileManager()
 semantic_search = SemanticSearch(vector_db)
+
+
+class JobData(BaseModel):
+    job_id: str 
+    role: Optional[str] = None
+    description: Optional[str] = None
+    requirements: Optional[str] = None
+
+class BatchMatchRequest(BaseModel):
+    user_id: Optional[str] = None 
+    jobs: List[JobData]
+
+class BatchMatchResponseItem(BaseModel):
+    job_id: str
+    matchScore: int
 
 class ProfileUpdate(BaseModel):
     skills: Optional[str] = None
@@ -42,9 +61,11 @@ class ProfileUpdate(BaseModel):
 class SearchQuery(BaseModel):
     query: str
 
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
 
 @app.post("/api/upload-resume")
 async def upload_resume(
@@ -86,6 +107,7 @@ async def upload_resume(
         except Exception as e:
             print(f"Error deleting file: {e}")
 
+
 @app.get("/api/profile")
 async def get_profile(authorization: str = Header(None)):
     user_id = verify_token(authorization)
@@ -94,6 +116,7 @@ async def get_profile(authorization: str = Header(None)):
     
     profile = profile_manager.get_profile(user_id)
     return {"profile": profile}
+
 
 @app.put("/api/profile")
 async def update_profile(
@@ -111,6 +134,7 @@ async def update_profile(
     
     return {"message": "Profile updated successfully", "profile": updated_profile}
 
+
 @app.post("/api/semantic-search")
 async def semantic_search_endpoint(
     query: SearchQuery,
@@ -123,31 +147,94 @@ async def semantic_search_endpoint(
     results = semantic_search.search(query.query)
     return {"results": results}
 
+
 @app.post("/api/calculate-job-match")
 async def calculate_job_match(
-    job_data: dict,
+    data: dict,
     authorization: str = Header(None)
 ):
     """Calculate match score between candidate profile and job"""
-    user_id = verify_token(authorization)
+    # Prioritize user_id from the request body, fallback to token
+    user_id = data.get("user_id") or verify_token(authorization)
+
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     # Get candidate profile
     profile = profile_manager.get_profile(user_id)
     if not profile:
         return {"matchScore": 0}
-    
+
+    # The job data might be nested under 'job_data' if coming from the admin
+    job_data = data.get('job_data', data)
+
     # Calculate match using semantic search
     job_requirements = f"{job_data.get('role', '')} {job_data.get('description', '')} {job_data.get('requirements', '')}"
-    
+
     try:
         match_score = semantic_search.calculate_job_match(profile, job_requirements)
         return {"matchScore": match_score}
     except Exception as e:
         print(f"Error calculating match: {e}")
         return {"matchScore": 0}
-    
+
+
+
+@app.get("/api/admin/resumes/user-ids", response_model=List[str])
+async def get_user_ids_with_resumes(
+    authorization: str = Header(None)
+):
+    """Returns a list of user_ids that have uploaded resumes (have profiles)"""
+    # Ensure it's an admin making the request (basic check)
+    admin_id = verify_token(authorization)
+    if not admin_id: # A more robust check might verify admin role via Node API
+         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        # Fetch user_ids from the profiles collection
+        # Assumes a profile exists only if a resume was uploaded
+        user_ids = profile_manager.get_all_profile_user_ids()
+        return user_ids
+    except Exception as e:
+        print(f"Error fetching user_ids with resumes: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving user IDs")
+
+
+@app.post("/api/calculate-batch-job-match", response_model=List[BatchMatchResponseItem])
+async def calculate_batch_job_match(
+    request_data: BatchMatchRequest,
+    authorization: str = Header(None)
+):
+    """Calculate match scores for multiple jobs against one profile"""
+    # Prioritize user_id from request body (for admin), fallback to token (for candidate)
+    user_id = request_data.user_id or verify_token(authorization)
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Get the single candidate profile needed for all calculations
+    profile = profile_manager.get_profile(user_id)
+    if not profile:
+        # Return scores of 0 for all requested jobs if profile not found
+        return [BatchMatchResponseItem(job_id=job.job_id, matchScore=0) for job in request_data.jobs]
+
+    results = []
+    # Calculate score for each job sequentially (can be parallelized later if needed)
+    for job in request_data.jobs:
+        job_requirements = f"{job.role or ''} {job.description or ''} {job.requirements or ''}"
+        score = 0 # Default score
+        try:
+            # Reuse the existing single-score calculation logic
+            score = semantic_search.calculate_job_match(profile, job_requirements)
+        except Exception as e:
+            print(f"Error calculating match for job {job.job_id} and user {user_id}: {e}")
+            score = 0 # Assign 0 on error
+        results.append(BatchMatchResponseItem(job_id=job.job_id, matchScore=score))
+
+    return results
+
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

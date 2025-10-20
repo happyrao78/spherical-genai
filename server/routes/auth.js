@@ -7,6 +7,18 @@ const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Helper to format user response
+const formatUserResponse = (user) => {
+  const isSuper = user.email === process.env.ADMIN_EMAIL && user.role === 'admin';
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isSuperAdmin: isSuper,
+  };
+};
+
 // Email transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -21,6 +33,8 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// -------------------- USER ROUTES --------------------
+
 // Signup
 router.post('/signup', async (req, res) => {
   try {
@@ -33,7 +47,7 @@ router.post('/signup', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
     const user = await User.create({
       name,
@@ -88,29 +102,18 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
-    if (!user.isVerified) {
-      return res.status(401).json({ message: 'Please verify your email first' });
-    }
+    if (!user.isVerified) return res.status(401).json({ message: 'Please verify your email first' });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: formatUserResponse(user),
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -119,19 +122,27 @@ router.post('/login', async (req, res) => {
 
 // Get current user
 router.get('/me', protect, async (req, res) => {
-  res.json({ user: req.user });
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authorized' });
+  }
+  res.json({ user: formatUserResponse(req.user) });
 });
 
-// Admin login - Request OTP
+// -------------------- ADMIN ROUTES --------------------
+
+// Admin request OTP (create default admin if not exists)
 router.post('/admin/request-otp', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if admin user exists, if not create one
+    // Check if admin exists
     let admin = await User.findOne({ email, role: 'admin' });
-    
-    if (!admin) {
-      // Create default admin if credentials match
+
+    if (admin) {
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+    } else {
+      // Create default admin if credentials match env
       if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
         const hashedPassword = await bcrypt.hash(password, 10);
         admin = await User.create({
@@ -146,19 +157,13 @@ router.post('/admin/request-otp', async (req, res) => {
       }
     }
 
-    const isMatch = await bcrypt.compare(password, admin.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
     const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
     admin.otp = otp;
     admin.otpExpiry = otpExpiry;
     await admin.save();
 
-    // Send OTP email
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
@@ -168,19 +173,18 @@ router.post('/admin/request-otp', async (req, res) => {
 
     res.json({ message: 'OTP sent to your email' });
   } catch (error) {
+    console.error('Error in /admin/request-otp:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Admin login - Verify OTP
+// Admin verify OTP
 router.post('/admin/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
 
     const admin = await User.findOne({ email, role: 'admin' });
-    if (!admin) {
-      return res.status(404).json({ message: 'Admin not found' });
-    }
+    if (!admin) return res.status(404).json({ message: 'Admin not found' });
 
     if (admin.otp !== otp || admin.otpExpiry < new Date()) {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
@@ -194,14 +198,10 @@ router.post('/admin/verify-otp', async (req, res) => {
 
     res.json({
       token,
-      user: {
-        id: admin._id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
-      },
+      user: formatUserResponse(admin),
     });
   } catch (error) {
+    console.error('Error in /admin/verify-otp:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
