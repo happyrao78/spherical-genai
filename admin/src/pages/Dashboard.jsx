@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
-import { Briefcase, Users, Search, LogOut, Plus, Loader, FileText, UserPlus, AlertCircle } from 'lucide-react'; // Added UserPlus, AlertCircle
+import { Briefcase, Users, Search, LogOut, Plus, Loader, FileText, UserPlus, AlertCircle, UserMinus, ExternalLink } from 'lucide-react';
 
 const Dashboard = () => {
-  const { admin, logout } = useAuth(); // admin object now has isSuperAdmin
-  const [activeTab, setActiveTab] = useState('jobs'); // Default back to jobs or keep 'candidates'
+  const { admin, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState('jobs');
   const [jobs, setJobs] = useState([]);
   const [applications, setApplications] = useState([]);
-  const [candidates, setCandidates] = useState([]); // Candidates with resumes list
-  const [candidateUsers, setCandidateUsers] = useState([]); // Users available for promotion
+  const [candidates, setCandidates] = useState([]);
+  const [candidateUsers, setCandidateUsers] = useState([]);
+  const [admins, setAdmins] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [showJobForm, setShowJobForm] = useState(false); // State to toggle job form visibility
-  const [jobForm, setJobForm] = useState({ // State for the job form fields
+  const [showJobForm, setShowJobForm] = useState(false);
+  const [jobForm, setJobForm] = useState({
     title: '',
     company: '',
     description: '',
@@ -22,31 +23,36 @@ const Dashboard = () => {
     salary: '',
     requirements: '',
   });
-  const [loadingError, setLoadingError] = useState(''); // State for loading errors
+  const [newAdminForm, setNewAdminForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+  });
+  const [loadingError, setLoadingError] = useState('');
 
-  // Fetch data based on admin status when component mounts or admin object changes
   useEffect(() => {
-    setLoadingError(''); // Clear previous errors on reload/login change
-    if (admin) { // Only fetch if admin object is available
+    setLoadingError('');
+    if (admin) {
       fetchJobs();
       fetchApplications();
       fetchCandidates();
 
       if (admin.isSuperAdmin) {
         fetchCandidateUsers();
+        fetchAdmins();
       } else {
-        setCandidateUsers([]); // Clear promotion list if not super admin
+        setCandidateUsers([]);
+        setAdmins([]);
       }
     } else {
-      // Clear data if admin logs out
       setJobs([]);
       setApplications([]);
       setCandidates([]);
       setCandidateUsers([]);
+      setAdmins([]);
     }
-  }, [admin]); // Re-run fetches when admin object changes
+  }, [admin]);
 
-  // --- Data Fetching Functions ---
   const fetchJobs = async () => {
     try {
       const res = await nodeAPI.get('/admin/jobs');
@@ -88,26 +94,31 @@ const Dashboard = () => {
     }
   };
 
-  // --- Action Handlers ---
+  const fetchAdmins = async () => {
+    if (!admin?.isSuperAdmin) return;
+    try {
+      const res = await nodeAPI.get('/admin/users/admins');
+      setAdmins(res.data.admins || []);
+    } catch (error) {
+      console.error('Error fetching admins:', error);
+      alert('Could not load admins list.');
+    }
+  };
+
   const handleCreateJob = async (e) => {
-    e.preventDefault(); // Prevent default form submission behavior
-    // Basic frontend validation
+    e.preventDefault();
     if (!jobForm.title || !jobForm.company || !jobForm.description || !jobForm.role || !jobForm.salary) {
       alert('Please fill in all required job fields.');
       return;
     }
     try {
-      // Send the jobForm data to the backend
       await nodeAPI.post('/admin/jobs', jobForm);
-
-      // On success: hide form, reset fields, refresh list, notify user
       setShowJobForm(false);
       setJobForm({ title: '', company: '', description: '', role: '', salary: '', requirements: '' });
       fetchJobs();
       alert('Job posted successfully!');
     } catch (error) {
       console.error('Error creating job:', error);
-      // Show backend error message if available
       alert(`Error creating job: ${error.response?.data?.message || 'Server error. Please check console.'}`);
     }
   };
@@ -120,10 +131,44 @@ const Dashboard = () => {
     try {
       await nodeAPI.post(`/admin/users/promote/${userId}`);
       alert('User promoted successfully!');
-      fetchCandidateUsers(); // Refresh the list
+      fetchCandidateUsers();
+      fetchAdmins();
     } catch (error) {
       console.error('Error promoting user:', error);
       alert(`Promotion failed: ${error.response?.data?.message || 'Server error'}`);
+    }
+  };
+
+  const handleDemoteAdmin = async (userId, userName) => {
+    if (!admin?.isSuperAdmin) return;
+    if (!window.confirm(`Are you sure you want to demote ${userName} to a regular user?`)) {
+      return;
+    }
+    try {
+      await nodeAPI.post(`/admin/users/demote/${userId}`);
+      alert('Admin demoted successfully!');
+      fetchAdmins();
+      fetchCandidateUsers();
+    } catch (error) {
+      console.error('Error demoting admin:', error);
+      alert(`Demotion failed: ${error.response?.data?.message || 'Server error'}`);
+    }
+  };
+
+  const handleCreateAdmin = async (e) => {
+    e.preventDefault();
+    if (!newAdminForm.name || !newAdminForm.email || !newAdminForm.password) {
+      alert('Please fill in all fields for the new admin.');
+      return;
+    }
+    try {
+      await nodeAPI.post('/admin/users/create-admin', newAdminForm);
+      setNewAdminForm({ name: '', email: '', password: '' });
+      fetchAdmins();
+      alert('New admin created successfully!');
+    } catch (error) {
+      console.error('Error creating admin:', error);
+      alert(`Error creating admin: ${error.response?.data?.message || 'Server error.'}`);
     }
   };
 
@@ -138,7 +183,6 @@ const Dashboard = () => {
     try {
       const res = await pythonAPI.post('/semantic-search', { query: searchQuery });
       setSearchResults(res.data.results || []);
-      // Message handled in the JSX now
     } catch (error) {
       console.error('Search error:', error);
       alert('Error performing search');
@@ -147,7 +191,6 @@ const Dashboard = () => {
     }
   };
 
-  // --- Helper Functions ---
   const getMatchColor = (score) => {
     if (score === undefined || score === null) return 'text-gray-500';
     if (score >= 80) return 'text-green-600';
@@ -173,7 +216,6 @@ const Dashboard = () => {
     }
   };
 
-  // --- JSX Rendering ---
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -195,7 +237,6 @@ const Dashboard = () => {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Loading Error Display */}
         {loadingError && (
           <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded flex items-center">
             <AlertCircle className="h-5 w-5 mr-3" />
@@ -206,23 +247,18 @@ const Dashboard = () => {
         {/* Tabs */}
         <div className="bg-white rounded-lg shadow mb-6">
           <div className="flex border-b flex-wrap">
-            {/* Job Postings Tab */}
             <button onClick={() => setActiveTab('jobs')} className={`flex-1 min-w-[150px] py-4 px-6 text-center font-medium ${activeTab === 'jobs' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600 hover:text-gray-900'}`}>
               <Briefcase className="h-5 w-5 inline mr-2" /> Job Postings
             </button>
-            {/* Applications Tab */}
             <button onClick={() => setActiveTab('applications')} className={`flex-1 min-w-[150px] py-4 px-6 text-center font-medium ${activeTab === 'applications' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600 hover:text-gray-900'}`}>
               <Users className="h-5 w-5 inline mr-2" /> Applications
             </button>
-            {/* Candidates w/ Resumes Tab */}
             <button onClick={() => setActiveTab('candidates')} className={`flex-1 min-w-[150px] py-4 px-6 text-center font-medium ${activeTab === 'candidates' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600 hover:text-gray-900'}`}>
               <FileText className="h-5 w-5 inline mr-2" /> Candidates w/ Resumes
             </button>
-            {/* Semantic Search Tab */}
             <button onClick={() => setActiveTab('search')} className={`flex-1 min-w-[150px] py-4 px-6 text-center font-medium ${activeTab === 'search' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600 hover:text-gray-900'}`}>
               <Search className="h-5 w-5 inline mr-2" /> Semantic Search
             </button>
-            {/* Manage Admins Tab (Conditional) */}
             {admin?.isSuperAdmin && (
               <button onClick={() => setActiveTab('manageAdmins')} className={`flex-1 min-w-[150px] py-4 px-6 text-center font-medium ${activeTab === 'manageAdmins' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:text-gray-900'}`}>
                 <UserPlus className="h-5 w-5 inline mr-2" /> Manage Admins
@@ -231,113 +267,102 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* ======================= */}
-        {/* Jobs Tab Content        */}
-        {/* ======================= */}
         {activeTab === 'jobs' && (
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">Job Postings {admin?.isSuperAdmin ? '(All)' : '(My Postings)'}</h2>
               <button
-                onClick={() => setShowJobForm(!showJobForm)} // Correctly toggles state
+                onClick={() => setShowJobForm(!showJobForm)}
                 className="flex items-center bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
               >
                 <Plus className="h-5 w-5 mr-2" />
-                {showJobForm ? 'Cancel' : 'New Job'} {/* Dynamically change button text */}
+                {showJobForm ? 'Cancel' : 'New Job'}
               </button>
             </div>
 
-            {/* --- Corrected New Job Form --- */}
             {showJobForm && (
               <form onSubmit={handleCreateJob} className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
                 <h3 className="text-lg font-semibold mb-4 text-gray-800">Create New Job Posting</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Job Title */}
                   <div>
                     <label htmlFor="jobTitle" className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
                     <input
                       id="jobTitle"
                       type="text"
-                      value={jobForm.title} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.title}
+                      onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       required
                     />
                   </div>
-                  {/* Company */}
                   <div>
                     <label htmlFor="jobCompany" className="block text-sm font-medium text-gray-700 mb-1">Company</label>
                     <input
                       id="jobCompany"
                       type="text"
-                      value={jobForm.company} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, company: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.company}
+                      onChange={(e) => setJobForm({ ...jobForm, company: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       required
                     />
                   </div>
-                  {/* Role */}
                   <div>
                     <label htmlFor="jobRole" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                     <input
                       id="jobRole"
                       type="text"
-                      value={jobForm.role} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, role: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.role}
+                      onChange={(e) => setJobForm({ ...jobForm, role: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       placeholder="e.g., Software Engineer, Marketing Manager"
                       required
                     />
                   </div>
-                  {/* Salary */}
                   <div>
                     <label htmlFor="jobSalary" className="block text-sm font-medium text-gray-700 mb-1">Salary (CTC)</label>
                     <input
                       id="jobSalary"
                       type="text"
-                      value={jobForm.salary} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, salary: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.salary}
+                      onChange={(e) => setJobForm({ ...jobForm, salary: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       placeholder="e.g., 12 LPA, 80,000 INR/Month"
                       required
                     />
                   </div>
-                  {/* Description */}
                   <div className="md:col-span-2">
                     <label htmlFor="jobDescription" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                     <textarea
                       id="jobDescription"
-                      value={jobForm.description} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.description}
+                      onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       rows="4"
                       required
                     />
                   </div>
-                  {/* Requirements */}
                   <div className="md:col-span-2">
                     <label htmlFor="jobRequirements" className="block text-sm font-medium text-gray-700 mb-1">Requirements (Optional)</label>
                     <textarea
                       id="jobRequirements"
-                      value={jobForm.requirements} // Correct: Binds to jobForm state
-                      onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })} // Correct: Updates jobForm state
+                      value={jobForm.requirements}
+                      onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
                       rows="3"
                       placeholder="List required skills, experience, qualifications..."
                     />
                   </div>
                 </div>
-                {/* Form Buttons */}
                 <div className="mt-6 flex space-x-3 justify-end">
                   <button
                     type="button"
-                    onClick={() => setShowJobForm(false)} // Correctly hides form on cancel
+                    onClick={() => setShowJobForm(false)}
                     className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300"
                   >
                     Cancel
                   </button>
                   <button
-                    type="submit" // Correctly submits the form
+                    type="submit"
                     className="bg-purple-600 text-white px-5 py-2 rounded-lg hover:bg-purple-700"
                   >
                     Create Job
@@ -346,8 +371,7 @@ const Dashboard = () => {
               </form>
             )}
 
-            {/* Job List */}
-            <div className="mt-6 space-y-4"> {/* Added margin if form is shown */}
+            <div className="mt-6 space-y-4">
               {jobs.length === 0 ? (
                 <p className="text-gray-600 text-center py-4">No jobs posted yet {admin?.isSuperAdmin ? '' : 'by you'}.</p>
               ) : (
@@ -370,9 +394,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* --- Other Tab Contents --- */}
-
-        {/* Applications Tab Content */}
         {activeTab === 'applications' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Applications {admin?.isSuperAdmin ? '(All)' : '(For My Jobs)'}</h2>
@@ -382,7 +403,6 @@ const Dashboard = () => {
               ) : (
                 applications.map((app) => (
                   <div key={app._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                    {/* ... Application card JSX ... */}
                      <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <h3 className="text-lg font-semibold text-gray-900">{app.candidate?.name || 'N/A'}</h3>
@@ -391,6 +411,17 @@ const Dashboard = () => {
                          {admin?.isSuperAdmin && app.job?.postedBy && (
                             <p className="text-xs text-gray-500 mt-1">Job posted by: {app.job.postedBy.name}</p>
                          )}
+                         {app.resumeUrl && (
+                            <a
+                                href={app.resumeUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
+                            >
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                View Resume
+                            </a>
+                        )}
                       </div>
                       <div className="flex flex-col items-end space-y-1">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${ app.status === 'accepted' ? 'bg-green-100 text-green-800' : app.status === 'rejected' ? 'bg-red-100 text-red-800' : app.status === 'reviewed' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800' }`}>
@@ -422,7 +453,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Candidates w/ Resumes Tab Content */}
         {activeTab === 'candidates' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Candidates with Uploaded Resumes</h2>
@@ -430,7 +460,6 @@ const Dashboard = () => {
               {candidates.length === 0 ? (<p className="text-gray-600">No candidates have uploaded resumes yet.</p>) : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
-                    {/* ... Table headers ... */}
                      <thead className="bg-gray-50">
                           <tr>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
@@ -454,7 +483,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Semantic Search Tab Content */}
         {activeTab === 'search' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Semantic Candidate Search</h2>
@@ -483,11 +511,21 @@ const Dashboard = () => {
               : searchResults.length === 0 ? (<p className="text-gray-600">Enter query to find candidates.</p>)
               : ( searchResults.map((result, index) => (
                     <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                        {/* ... Result card details ... */}
                          <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <h3 className="text-lg font-semibold text-gray-900">{result.name || 'Unknown'}</h3>
                             <p className="text-gray-600">{result.email}</p>
+                            {result.resume_url && (
+                                <a
+                                    href={result.resume_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
+                                >
+                                    <ExternalLink className="h-4 w-4 mr-1" />
+                                    View Resume
+                                </a>
+                            )}
                             {result.skills && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Skills:</p><p className="text-gray-600">{result.skills}</p></div> )}
                             {result.experience && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Experience:</p><p className="text-gray-600 text-sm">{result.experience}</p></div> )}
                             {result.education && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Education:</p><p className="text-gray-600 text-sm">{result.education}</p></div> )}
@@ -501,7 +539,6 @@ const Dashboard = () => {
                             <div className="text-xs text-gray-500 space-y-1"><div>Vector: {result.vector_score}%</div><div>AI: {result.ai_relevancy}%</div></div>
                           </div>
                         </div>
-                         {/* Score Bars */}
                          <div className="mt-4 space-y-2">
                             <div>
                                 <div className="flex justify-between text-xs mb-1"><span className="text-gray-600">Similarity</span><span className="font-medium">{result.vector_score}%</span></div>
@@ -519,38 +556,81 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Manage Admins Tab Content (Conditional) */}
         {activeTab === 'manageAdmins' && admin?.isSuperAdmin && (
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold mb-6">Promote User to Admin</h2>
-            <div className="space-y-4">
-              {candidateUsers.length === 0 ? (<p className="text-gray-600">No candidate users available to promote.</p>) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    {/* ... Table Headers ... */}
-                     <thead className="bg-gray-50"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th></tr></thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {candidateUsers.map((cUser) => (
-                        <tr key={cUser._id}>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cUser.name}</td>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cUser.email}</td>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <button onClick={() => handlePromoteUser(cUser._id, cUser.name)} className="text-indigo-600 hover:text-indigo-900 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                              Promote to Admin
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <h2 className="text-xl font-bold mb-6">Manage Admins</h2>
+            
+            <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
+              <h3 className="text-lg font-semibold mb-4 text-gray-800">Create New Admin</h3>
+              <form onSubmit={handleCreateAdmin} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                    <input type="text" value={newAdminForm.name} onChange={(e) => setNewAdminForm({ ...newAdminForm, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm({ ...newAdminForm, email: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <input type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm({ ...newAdminForm, password: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                  </div>
                 </div>
-              )}
+                <div className="text-right">
+                  <button type="submit" className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">Create Admin</button>
+                </div>
+              </form>
+            </div>
+
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold mb-4 text-gray-800">Promote Users to Admin</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th></tr></thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {candidateUsers.map((cUser) => (
+                      <tr key={cUser._id}>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cUser.name}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cUser.email}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <button onClick={() => handlePromoteUser(cUser._id, cUser.name)} className="text-indigo-600 hover:text-indigo-900 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                            <UserPlus className="h-4 w-4 mr-1" /> Promote
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-gray-800">Current Admins</h3>
+               <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th></tr></thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {admins.map((adminUser) => (
+                      <tr key={adminUser._id}>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{adminUser.name}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{adminUser.email}</td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <button onClick={() => handleDemoteAdmin(adminUser._id, adminUser.name)} className="text-red-600 hover:text-red-900 font-medium flex items-center">
+                            <UserMinus className="h-4 w-4 mr-1" /> Demote
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
 
-      </div> {/* End max-w-7xl container */}
-    </div> // End min-h-screen
+      </div>
+    </div>
   );
 };
 

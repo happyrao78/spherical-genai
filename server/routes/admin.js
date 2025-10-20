@@ -4,6 +4,8 @@ const Application = require('../models/Application');
 const User = require('../models/User'); // Ensure User model is imported
 const { protect, adminOnly, superAdminOnly } = require('../middleware/auth'); // Import all middlewares
 const axios = require('axios'); // Ensure axios is imported
+const bcrypt = require('bcryptjs');
+const Profile = require('../models/Profile');
 
 const router = express.Router();
 
@@ -31,7 +33,7 @@ router.post('/jobs', async (req, res) => {
     res.status(201).json({ message: 'Job created successfully', job });
   } catch (error) {
     if (error.name === 'ValidationError') {
-        return res.status(400).json({ message: 'Validation Error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation Error', errors: error.errors });
     }
     console.error('Error creating job:', error);
     res.status(500).json({ message: 'Server error creating job', error: error.message });
@@ -49,7 +51,7 @@ router.get('/jobs', async (req, res) => {
       query.postedBy = req.user._id;
       console.log(`Filtering jobs for regular admin: ${req.user.email}`);
     } else {
-        console.log(`Fetching all jobs for super admin: ${req.user.email}`);
+      console.log(`Fetching all jobs for super admin: ${req.user.email}`);
     }
 
 
@@ -80,20 +82,34 @@ router.get('/applications', async (req, res) => {
       const adminJobIds = adminJobs.map(job => job._id);
       // Filter applications where the 'job' field is in the list of admin's job IDs
       applicationFilter.job = { $in: adminJobIds };
-       console.log(`Filtering applications for regular admin ${req.user.email} based on ${adminJobIds.length} jobs.`);
+      console.log(`Filtering applications for regular admin ${req.user.email} based on ${adminJobIds.length} jobs.`);
     } else {
-         console.log(`Fetching all applications for super admin ${req.user.email}.`);
+      console.log(`Fetching all applications for super admin ${req.user.email}.`);
     }
 
     // Fetch applications matching the filter (all for super admin, filtered for regular admin)
     const applications = await Application.find(applicationFilter) // Apply the filter here
       .populate('candidate', 'name email')
       .populate({
-            path: 'job',
-            select: 'title company description role requirements postedBy', // Include postedBy ID
-       })
+        path: 'job',
+        select: 'title company description role requirements postedBy', // Include postedBy ID
+      })
       .sort({ createdAt: -1 })
       .lean();
+
+    const candidateIds = applications.map(app => app.candidate?._id.toString()).filter(id => id);
+    const profiles = await Profile.find({ user_id: { $in: candidateIds } }).select('user_id resume_url').lean();
+
+    const profileMap = profiles.reduce((map, profile) => {
+      map[profile.user_id] = profile.resume_url;
+      return map;
+    }, {});
+
+    applications.forEach(app => {
+      if (app.candidate) {
+        app.resumeUrl = profileMap[app.candidate._id.toString()] || null;
+      }
+    });
 
     console.log(`Found ${applications.length} applications matching filter.`);
 
@@ -111,9 +127,9 @@ router.get('/applications', async (req, res) => {
         }
         // Only add if job data is present (it should be after populate)
         if (app.job) {
-             groups[candidateId].push(app);
+          groups[candidateId].push(app);
         } else {
-             console.warn(`Application ${app._id} skipped for scoring due to missing job data.`);
+          console.warn(`Application ${app._id} skipped for scoring due to missing job data.`);
         }
 
       }
@@ -142,10 +158,10 @@ router.get('/applications', async (req, res) => {
       };
 
       if (batchPayload.jobs.length === 0) {
-         // This case should ideally not happen due to prior filtering, but good to keep
-         console.log(`No valid jobs to score for candidate ${candidateId}, assigning 0 score`);
-         candidateApps.forEach(app => applicationsWithScores.push({ ...app, matchScore: 0 }));
-         continue;
+        // This case should ideally not happen due to prior filtering, but good to keep
+        console.log(`No valid jobs to score for candidate ${candidateId}, assigning 0 score`);
+        candidateApps.forEach(app => applicationsWithScores.push({ ...app, matchScore: 0 }));
+        continue;
       }
 
       try {
@@ -161,8 +177,8 @@ router.get('/applications', async (req, res) => {
 
         candidateApps.forEach(app => {
           const score = (scoreMap[app.job._id.toString()] !== undefined)
-                          ? scoreMap[app.job._id.toString()]
-                          : 0;
+            ? scoreMap[app.job._id.toString()]
+            : 0;
           applicationsWithScores.push({ ...app, matchScore: score });
         });
         // console.log(`Scores calculated for candidate ${candidateId}`); // Can be noisy
@@ -187,13 +203,13 @@ router.get('/applications', async (req, res) => {
 
 // Update application status (PUT /applications/:id) - Accessible by all admins (consider scoping later if needed)
 router.put('/applications/:id', async (req, res) => {
-    // Note: This currently allows any admin to update status for any application they can see.
-    // If you need to restrict this to only the admin who posted the job, you'd add a check here
-    // comparing req.user._id to the application's job.postedBy field.
+  // Note: This currently allows any admin to update status for any application they can see.
+  // If you need to restrict this to only the admin who posted the job, you'd add a check here
+  // comparing req.user._id to the application's job.postedBy field.
   try {
     const { status } = req.body;
     if (!['pending', 'reviewed', 'accepted', 'rejected'].includes(status)) {
-         return res.status(400).json({ message: 'Invalid status value' });
+      return res.status(400).json({ message: 'Invalid status value' });
     }
 
     const application = await Application.findByIdAndUpdate(
@@ -202,9 +218,9 @@ router.put('/applications/:id', async (req, res) => {
       { new: true } // Return the updated document
     ).lean(); // Use lean
 
-     if (!application) {
-        return res.status(404).json({ message: 'Application not found' });
-     }
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
 
 
     // Optional: Add check here if needed:
@@ -216,7 +232,7 @@ router.put('/applications/:id', async (req, res) => {
 
     res.json({ message: 'Application updated', application });
   } catch (error) {
-     console.error('Error updating application status:', error);
+    console.error('Error updating application status:', error);
     res.status(500).json({ message: 'Server error updating application', error: error.message });
   }
 });
@@ -248,9 +264,9 @@ router.get('/candidates-with-resumes', async (req, res) => {
       _id: { $in: userIds },
       role: 'candidate',
     })
-    .select('name email createdAt')
-    .sort({ createdAt: -1 })
-    .lean();
+      .select('name email createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
 
     console.log(`Found ${candidates.length} candidate details in Node DB.`);
     res.json({ candidates });
@@ -282,10 +298,10 @@ router.post('/users/promote/:userId', superAdminOnly, async (req, res) => {
     console.log(`User ${user.email} promoted to admin by ${req.user.email}`);
     // Return lean user object without sensitive fields
     const promotedUserInfo = {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role
     };
     res.json({ message: 'User successfully promoted to admin', user: promotedUserInfo });
 
@@ -296,18 +312,92 @@ router.post('/users/promote/:userId', superAdminOnly, async (req, res) => {
 });
 
 // Get candidate users for promotion list (GET /users/candidates) - Super Admin Only
- router.get('/users/candidates', superAdminOnly, async (req, res) => {
-   try {
-     const candidates = await User.find({ role: 'candidate' })
-       .select('name email _id createdAt') // Include _id
-       .sort({ name: 1 })
-       .lean();
-     res.json({ candidates });
-   } catch (error) {
-     console.error('Error fetching candidates for promotion:', error);
-     res.status(500).json({ message: 'Server error fetching candidates' });
-   }
- });
+router.get('/users/candidates', superAdminOnly, async (req, res) => {
+  try {
+    const candidates = await User.find({ role: 'candidate' })
+      .select('name email _id createdAt') // Include _id
+      .sort({ name: 1 })
+      .lean();
+    res.json({ candidates });
+  } catch (error) {
+    console.error('Error fetching candidates for promotion:', error);
+    res.status(500).json({ message: 'Server error fetching candidates' });
+  }
+});
+
+// Create a new admin user - Super Admin Only
+router.post('/users/create-admin', superAdminOnly, async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Please provide name, email, and password' });
+  }
+
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User with this email already exists' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newAdmin = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role: 'admin',
+      isVerified: true, // Admins created by super admin are verified by default
+    });
+
+    res.status(201).json({ message: 'Admin user created successfully' });
+  } catch (error) {
+    console.error('Error creating admin user:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Demote an admin to a candidate - Super Admin Only
+router.post('/users/demote/:userId', superAdminOnly, async (req, res) => {
+  try {
+    const userIdToDemote = req.params.userId;
+    const user = await User.findById(userIdToDemote);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Prevent super admin from being demoted
+    if (user.email === process.env.ADMIN_EMAIL) {
+      return res.status(400).json({ message: 'Cannot demote the super admin' });
+    }
+
+    if (user.role !== 'admin') {
+      return res.status(400).json({ message: 'User is not an admin' });
+    }
+
+    user.role = 'candidate';
+    await user.save();
+
+    res.json({ message: 'User successfully demoted to candidate' });
+  } catch (error) {
+    console.error('Error demoting user:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get all admins (excluding super admin) - Super Admin Only
+router.get('/users/admins', superAdminOnly, async (req, res) => {
+  try {
+    const admins = await User.find({
+      role: 'admin',
+      email: { $ne: process.env.ADMIN_EMAIL } // Exclude the super admin
+    }).select('name email _id').lean();
+    res.json({ admins });
+  } catch (error) {
+    console.error('Error fetching admins:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 
 module.exports = router;

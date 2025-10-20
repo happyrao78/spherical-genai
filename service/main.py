@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+import cloudinary
+import cloudinary.uploader
 
 from services.auth import verify_token
 from services.resume_processor import process_resume
@@ -17,6 +19,14 @@ from services.semantic_search import SemanticSearch
 load_dotenv()
 
 app = FastAPI()
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+)
+
 
 # CORS
 app.add_middleware(
@@ -76,19 +86,27 @@ async def upload_resume(
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    # Save in local temp folder
     file_path = TEMP_DIR / resume.filename
     
     try:
         with open(file_path, "wb") as f:
             content = await resume.read()
             f.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
-    
-    try:
+            
+        # Upload to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            str(file_path),
+            resource_type="auto",
+            folder="resumes"
+        )
+        resume_url = upload_result.get("secure_url")
+
+        if not resume_url:
+            raise HTTPException(status_code=500, detail="Could not upload resume to cloud storage.")
+
         # Process resume
         extracted_data = process_resume(str(file_path))
+        extracted_data["resume_url"] = resume_url
         
         # Store in vector DB
         vector_db.upsert_candidate(user_id, extracted_data)
