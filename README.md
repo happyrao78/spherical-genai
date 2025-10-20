@@ -42,3 +42,5 @@ SERVICE:
 2. setup virtual env
 3. pip install -r requirements.txt
 4. run command : python main.py
+
+
