@@ -19,13 +19,84 @@ const CandidateDashboard = () => {
     fetchAppliedJobs();
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
     if (profile) {
-      fetchJobsWithScores();
+      fetchJobsAndCalculateScores(); 
     } else {
-      fetchJobs();
+       fetchJobs(); 
     }
-  }, [profile]);
+  }, [profile]); 
+
+
+
+  const fetchJobs = async () => {
+      // Fetches jobs without scores (used if no profile)
+      setLoadingScores(true); // Indicate loading
+      try {
+          const res = await nodeAPI.get('/jobs');
+          // Add matchScore: null or 0 initially if needed for consistent data structure
+          const jobsData = res.data.jobs.map(job => ({ ...job, matchScore: null }));
+          setJobs(jobsData);
+      } catch (error) {
+          console.error('Error fetching jobs:', error);
+      } finally {
+          setLoadingScores(false);
+      }
+  };
+
+
+  const fetchJobsAndCalculateScores = async () => {
+    setLoadingScores(true);
+    try {
+      // 1. Fetch all jobs from Node.js
+      const jobsRes = await nodeAPI.get('/jobs');
+      let jobsData = jobsRes.data.jobs;
+
+      if (jobsData && jobsData.length > 0) {
+        // 2. Prepare batch request payload
+        const batchPayload = {
+          // No user_id needed here, Python service will use token
+          jobs: jobsData.map(job => ({
+            job_id: job._id,
+            role: job.role,
+            description: job.description,
+            requirements: job.requirements || '',
+          })),
+        };
+
+        // 3. Call the new batch endpoint in Python service
+        const scoresRes = await pythonAPI.post('/calculate-batch-job-match', batchPayload);
+        const scoresData = scoresRes.data; // Expected: [{job_id: "...", matchScore: ...}]
+
+        // 4. Create a map for quick score lookup
+        const scoreMap = scoresData.reduce((map, item) => {
+          map[item.job_id] = item.matchScore;
+          return map;
+        }, {});
+
+        // 5. Merge scores back into job data
+        jobsData = jobsData.map(job => ({
+          ...job,
+          matchScore: scoreMap[job._id] !== undefined ? scoreMap[job._id] : 0, // Assign score or default to 0
+        }));
+
+        // 6. Sort jobs by score
+        jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+      } else {
+          jobsData = []; // Ensure jobsData is an array
+      }
+
+
+      setJobs(jobsData); // Update state with jobs having scores
+    } catch (error) {
+      console.error('Error fetching jobs and scores:', error);
+      // Optionally fetch jobs without scores as a fallback
+       fetchJobs();
+    } finally {
+      setLoadingScores(false);
+    }
+  };
+
 
   const fetchAppliedJobs = async () => {
     try {
@@ -36,14 +107,7 @@ const CandidateDashboard = () => {
     }
   };
 
-  const fetchJobs = async () => {
-    try {
-      const res = await nodeAPI.get('/jobs');
-      setJobs(res.data.jobs);
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-    }
-  };
+
 
   const fetchJobsWithScores = async () => {
     try {
