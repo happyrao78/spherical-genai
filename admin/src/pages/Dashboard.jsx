@@ -89,7 +89,7 @@ const Dashboard = () => {
     }
   };
 
-  const getMatchColor = (score) => {
+const getMatchColor = (score) => {
     if (score >= 80) return 'text-green-600';
     if (score >= 60) return 'text-yellow-600';
     if (score >= 40) return 'text-orange-600';
@@ -284,6 +284,7 @@ const Dashboard = () => {
         )}
 
         {/* Applications Tab */}
+{/* Applications Tab */}
         {activeTab === 'applications' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Applications</h2>
@@ -292,8 +293,8 @@ const Dashboard = () => {
                 <p className="text-gray-600">No applications yet</p>
               ) : (
                 applications.map((app) => (
-                  <div key={app._id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start">
+                  <div key={app._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <h3 className="text-lg font-semibold text-gray-900">
                           {app.candidate?.name}
@@ -302,31 +303,37 @@ const Dashboard = () => {
                         <p className="text-purple-600 font-medium mt-2">
                           Applied for: {app.job?.title}
                         </p>
-                        {app.matchScore && (
-                          <div className="mt-2">
-                            <span className="text-sm font-medium text-gray-700">
-                              Match Score: <span className="text-purple-600">{app.matchScore}%</span>
-                            </span>
-                          </div>
-                        )}
                       </div>
-                      <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
-                        {app.status}
-                      </span>
+                      <div className="ml-4 text-center">
+                        <div className={`text-2xl font-bold ${getMatchColor(app.matchScore)}`}>
+                          {app.matchScore}%
+                        </div>
+                        <div className="text-xs text-gray-500">Match</div>
+                      </div>
                     </div>
-                    {app.candidate?.skills && (
-                      <div className="mt-3">
-                        <p className="text-sm font-medium text-gray-700">Skills:</p>
-                        <p className="text-gray-600">{app.candidate.skills}</p>
+
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium text-gray-700">Eligibility Score</span>
+                        <span className={`text-sm font-semibold ${getMatchColor(app.matchScore)}`}>
+                          {app.matchScore >= 80 ? 'Excellent Match' :
+                           app.matchScore >= 60 ? 'Good Match' :
+                           app.matchScore >= 40 ? 'Fair Match' : 'Low Match'}
+                        </span>
                       </div>
-                    )}
+                      <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div
+                          className={`h-2.5 rounded-full ${getMatchBgColor(app.matchScore)}`}
+                          style={{ width: `${app.matchScore}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
         )}
-
         {/* Semantic Search Tab */}
         {activeTab === 'search' && (
           <div className="bg-white rounded-lg shadow p-6">

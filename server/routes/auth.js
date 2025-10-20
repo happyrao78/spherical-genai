@@ -123,15 +123,22 @@ router.get('/me', protect, async (req, res) => {
 });
 
 // Admin login - Request OTP
+// Admin login - Request OTP
 router.post('/admin/request-otp', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if admin user exists, if not create one
+    // Check if admin exists
     let admin = await User.findOne({ email, role: 'admin' });
-    
-    if (!admin) {
-      // Create default admin if credentials match
+
+    if (admin) {
+      // Admin exists → verify password
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+    } else {
+      // Admin doesn't exist → create default admin if credentials match env
       if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
         const hashedPassword = await bcrypt.hash(password, 10);
         admin = await User.create({
@@ -146,13 +153,9 @@ router.post('/admin/request-otp', async (req, res) => {
       }
     }
 
-    const isMatch = await bcrypt.compare(password, admin.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
+    // Generate OTP
     const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     admin.otp = otp;
     admin.otpExpiry = otpExpiry;
@@ -168,9 +171,15 @@ router.post('/admin/request-otp', async (req, res) => {
 
     res.json({ message: 'OTP sent to your email' });
   } catch (error) {
+    console.error('Error in /admin/request-otp:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
+
+
+
+
 
 // Admin login - Verify OTP
 router.post('/admin/verify-otp', async (req, res) => {

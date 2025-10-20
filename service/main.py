@@ -125,29 +125,36 @@ async def semantic_search_endpoint(
 
 @app.post("/api/calculate-job-match")
 async def calculate_job_match(
-    job_data: dict,
+    data: dict,
     authorization: str = Header(None)
 ):
     """Calculate match score between candidate profile and job"""
-    user_id = verify_token(authorization)
+    # Prioritize user_id from the request body, fallback to token
+    user_id = data.get("user_id") or verify_token(authorization)
+
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     # Get candidate profile
     profile = profile_manager.get_profile(user_id)
     if not profile:
         return {"matchScore": 0}
-    
+
+    # The job data might be nested under 'job_data' if coming from the admin
+    job_data = data.get('job_data', data)
+
     # Calculate match using semantic search
     job_requirements = f"{job_data.get('role', '')} {job_data.get('description', '')} {job_data.get('requirements', '')}"
-    
+
     try:
         match_score = semantic_search.calculate_job_match(profile, job_requirements)
         return {"matchScore": match_score}
     except Exception as e:
         print(f"Error calculating match: {e}")
         return {"matchScore": 0}
-    
+
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

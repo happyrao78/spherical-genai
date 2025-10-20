@@ -2,12 +2,57 @@ const express = require('express');
 const Job = require('../models/Job');
 const Application = require('../models/Application');
 const { protect, adminOnly } = require('../middleware/auth');
+const axios = require('axios'); 
 
 const router = express.Router();
 
 // All routes require admin authentication
 router.use(protect);
 router.use(adminOnly);
+
+
+
+router.get('/applications', async (req, res) => {
+  try {
+    const applications = await Application.find()
+      .populate('candidate', 'name email')
+      .populate('job', 'title company description role requirements') // Populate job details
+      .sort({ createdAt: -1 });
+
+    // Calculate match scores
+    const applicationsWithScores = await Promise.all(
+      applications.map(async (app) => {
+        if (app.job && app.candidate) {
+          try {
+            const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
+            const matchRes = await axios.post(`${pythonApiUrl}/calculate-job-match`, {
+              job_data: {
+                role: app.job.role,
+                description: app.job.description,
+                requirements: app.job.requirements || '',
+              },
+              user_id: app.candidate._id.toString(),
+            }, {
+              headers: {
+                Authorization: req.headers.authorization,
+              }
+            });
+            app.matchScore = matchRes.data.matchScore || 0;
+          } catch (error) {
+            console.error('Error calculating match for application:', app._id, error);
+            app.matchScore = 0; // Default to 0 on error
+          }
+        }
+        return app;
+      })
+    );
+
+    res.json({ applications: applicationsWithScores });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 
 // Create job
 router.post('/jobs', async (req, res) => {
