@@ -9,7 +9,6 @@ const Dashboard = () => {
   const [jobs, setJobs] = useState([]);
   const [applications, setApplications] = useState([]);
   const [candidates, setCandidates] = useState([]);
-  const [candidateUsers, setCandidateUsers] = useState([]);
   const [admins, setAdmins] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -38,7 +37,6 @@ const Dashboard = () => {
       fetchCandidates();
 
       if (admin.isSuperAdmin) {
-        fetchCandidateUsers();
         fetchAdmins();
       } else {
         setCandidateUsers([]);
@@ -83,16 +81,6 @@ const Dashboard = () => {
     }
   };
 
-  const fetchCandidateUsers = async () => {
-    if (!admin?.isSuperAdmin) return;
-    try {
-      const res = await nodeAPI.get('/admin/users/candidates');
-      setCandidateUsers(res.data.candidates || []);
-    } catch (error) {
-      console.error('Error fetching candidate users for promotion:', error);
-      alert('Could not load users for promotion.');
-    }
-  };
 
   const fetchAdmins = async () => {
     if (!admin?.isSuperAdmin) return;
@@ -120,38 +108,6 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error creating job:', error);
       alert(`Error creating job: ${error.response?.data?.message || 'Server error. Please check console.'}`);
-    }
-  };
-
-  const handlePromoteUser = async (userId, userName) => {
-    if (!admin?.isSuperAdmin) return;
-    if (!window.confirm(`Are you sure you want to promote ${userName} to Admin?`)) {
-      return;
-    }
-    try {
-      await nodeAPI.post(`/admin/users/promote/${userId}`);
-      alert('User promoted successfully!');
-      fetchCandidateUsers();
-      fetchAdmins();
-    } catch (error) {
-      console.error('Error promoting user:', error);
-      alert(`Promotion failed: ${error.response?.data?.message || 'Server error'}`);
-    }
-  };
-
-  const handleDemoteAdmin = async (userId, userName) => {
-    if (!admin?.isSuperAdmin) return;
-    if (!window.confirm(`Are you sure you want to demote ${userName} to a regular user?`)) {
-      return;
-    }
-    try {
-      await nodeAPI.post(`/admin/users/demote/${userId}`);
-      alert('Admin demoted successfully!');
-      fetchAdmins();
-      fetchCandidateUsers();
-    } catch (error) {
-      console.error('Error demoting admin:', error);
-      alert(`Demotion failed: ${error.response?.data?.message || 'Server error'}`);
     }
   };
 
@@ -473,8 +429,31 @@ const Dashboard = () => {
                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{candidate.name}</td>
                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{candidate.email}</td>
                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(candidate.createdAt)}</td>
+
+
+<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        {candidate.resumeUrl ? (
+          <a
+            href={candidate.resumeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center text-blue-600 hover:underline"
+          >
+            <ExternalLink className="h-4 w-4 mr-1" />
+            View
+          </a>
+        ) : (
+          <span className="text-gray-400">No Resume Link</span>
+        )}
+     </td>
+
+
+
+
                         </tr>
                       ))}
+
+                      
                     </tbody>
                   </table>
                 </div>
@@ -583,28 +562,6 @@ const Dashboard = () => {
               </form>
             </div>
 
-            <div className="mb-8">
-              <h3 className="text-lg font-semibold mb-4 text-gray-800">Promote Users to Admin</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th></tr></thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {candidateUsers.map((cUser) => (
-                      <tr key={cUser._id}>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cUser.name}</td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cUser.email}</td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <button onClick={() => handlePromoteUser(cUser._id, cUser.name)} className="text-indigo-600 hover:text-indigo-900 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
-                            <UserPlus className="h-4 w-4 mr-1" /> Promote
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
             <div>
               <h3 className="text-lg font-semibold mb-4 text-gray-800">Current Admins</h3>
                <div className="overflow-x-auto">
@@ -615,11 +572,6 @@ const Dashboard = () => {
                       <tr key={adminUser._id}>
                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{adminUser.name}</td>
                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{adminUser.email}</td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <button onClick={() => handleDemoteAdmin(adminUser._id, adminUser.name)} className="text-red-600 hover:text-red-900 font-medium flex items-center">
-                            <UserMinus className="h-4 w-4 mr-1" /> Demote
-                          </button>
-                        </td>
                       </tr>
                     ))}
                   </tbody>

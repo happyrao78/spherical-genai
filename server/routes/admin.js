@@ -102,30 +102,80 @@ router.put('/applications/:id', async (req, res) => {
     }
 });
 
+
+
+
 router.get('/candidates-with-resumes', async (req, res) => {
+  console.log("\n[SERVER] Received request for /admin/candidates-with-resumes");
   try {
+    // 1. Get user_ids from Python service (existing code)
     const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
     const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
-    const userIds = pythonRes.data || [];
-    if (userIds.length === 0) return res.json({ candidates: [] });
-    const candidates = await User.find({ _id: { $in: userIds }, role: 'candidate' }).select('name email createdAt').sort({ createdAt: -1 }).lean();
-    res.json({ candidates });
+    const userIdsFromPython = pythonRes.data || [];
+    console.log(`[SERVER-DEBUG] Fetched ${userIdsFromPython.length} user IDs with resumes from Python service.`);
+
+    if (userIdsFromPython.length === 0) {
+      console.log("[SERVER-DEBUG] No user IDs found, returning empty candidates list.");
+      return res.json({ candidates: [] });
+    }
+
+    // 2. Fetch User details for these IDs (existing code, adjusted)
+    // Convert userIdsFromPython (strings) to ObjectId for User query if necessary, though comparing strings might work too.
+    // Let's fetch using the string IDs first, then adjust if needed.
+    const candidates = await User.find({ _id: { $in: userIdsFromPython } }) // Querying User model by _id
+                                 .select('name email createdAt')
+                                 .sort({ createdAt: -1 })
+                                 .lean();
+    console.log(`[SERVER-DEBUG] Found ${candidates.length} User documents matching the IDs.`);
+
+
+    // --- START: ADDED CODE TO FETCH RESUME URLS ---
+    // 3. Fetch corresponding Profiles using user_id (which matches User._id as string)
+    const profiles = await Profile.find({ user_id: { $in: userIdsFromPython } }) // Querying Profile model by user_id string
+                                  .select('user_id resume_url')
+                                  .lean();
+    console.log(`[SERVER-DEBUG] Found ${profiles.length} Profile documents with resume URLs.`);
+
+    // 4. Create a map for easy lookup (userId -> resumeUrl)
+    const profileMap = profiles.reduce((map, profile) => {
+      map[profile.user_id] = profile.resume_url; // user_id is already a string here
+      return map;
+    }, {});
+
+    // 5. Add resumeUrl to each candidate object
+    const candidatesWithResumes = candidates.map(candidate => ({
+      ...candidate,
+      resumeUrl: profileMap[candidate._id.toString()] || null // Convert candidate._id to string for lookup
+    }));
+    console.log("[SERVER-DEBUG] Successfully merged resume URLs into candidates data.");
+    // --- END: ADDED CODE ---
+
+    res.json({ candidates: candidatesWithResumes }); // Send the merged data
+
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('[SERVER] Error fetching candidates with resumes:', error);
+    // Provide more detailed error response
+    res.status(500).json({
+       message: 'Server error fetching candidates',
+       error: error.message,
+       response: error.response?.data // Include Python API error if available
+    });
   }
 });
 
-router.post('/users/promote/:userId', superAdminOnly, async (req, res) => {
-    try {
-        const user = await User.findById(req.params.userId);
-        if (!user || user.role === 'admin') return res.status(400).json({ message: 'Cannot promote this user.' });
-        user.role = 'admin';
-        await user.save();
-        res.json({ message: 'User promoted.' });
-    } catch (error) {
-        res.status(500).json({ message: 'Server error.' });
-    }
-});
+
+
+// router.post('/users/promote/:userId', superAdminOnly, async (req, res) => {
+//     try {
+//         const user = await User.findById(req.params.userId);
+//         if (!user || user.role === 'admin') return res.status(400).json({ message: 'Cannot promote this user.' });
+//         user.role = 'admin';
+//         await user.save();
+//         res.json({ message: 'User promoted.' });
+//     } catch (error) {
+//         res.status(500).json({ message: 'Server error.' });
+//     }
+// });
 
 router.get('/users/candidates', superAdminOnly, async (req, res) => {
     try {
@@ -148,17 +198,17 @@ router.post('/users/create-admin', superAdminOnly, async (req, res) => {
     }
 });
 
-router.post('/users/demote/:userId', superAdminOnly, async (req, res) => {
-    try {
-        const user = await User.findById(req.params.userId);
-        if (!user || user.email === process.env.ADMIN_EMAIL) return res.status(400).json({ message: 'Cannot demote this user.' });
-        user.role = 'candidate';
-        await user.save();
-        res.json({ message: 'User demoted.' });
-    } catch (error) {
-        res.status(500).json({ message: 'Server error.' });
-    }
-});
+// router.post('/users/demote/:userId', superAdminOnly, async (req, res) => {
+//     try {
+//         const user = await User.findById(req.params.userId);
+//         if (!user || user.email === process.env.ADMIN_EMAIL) return res.status(400).json({ message: 'Cannot demote this user.' });
+//         user.role = 'candidate';
+//         await user.save();
+//         res.json({ message: 'User demoted.' });
+//     } catch (error) {
+//         res.status(500).json({ message: 'Server error.' });
+//     }
+// });
 
 router.get('/users/admins', superAdminOnly, async (req, res) => {
     try {
