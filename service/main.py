@@ -116,25 +116,31 @@ async def upload_resume(
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
-            resource_type="auto",
-            folder="resumes"
+            resource_type="raw", # Use 'raw' for non-image files like PDFs
+            folder="resumes",
+            access_mode="public"
         )
         
         print("\n--- Cloudinary Upload Result ---")
         print(upload_result)
         print("--------------------------------\n")
         
-        resume_url = upload_result.get("secure_url")
+        secure_url = upload_result.get("secure_url")
 
-        if not resume_url:
+        if not secure_url:
             print("[DEBUG] ERROR: 'secure_url' not found in Cloudinary response.")
             raise HTTPException(status_code=500, detail="Could not upload resume to cloud storage.")
 
-        print(f"[DEBUG] Resume URL from Cloudinary: {resume_url}")
+        # --- START: THE FIX FOR PDF LOADING ---
+        # Add the 'fl_inline' flag to the URL to force browser display
+        parts = secure_url.split("/upload/")
+        inline_url = f"{parts[0]}/upload/fl_inline/{parts[1]}"
+        print(f"[SERVICE-DEBUG] Generated inline URL: {inline_url}")
+        # --- END: THE FIX FOR PDF LOADING ---
 
         # Process resume text
         extracted_data = process_resume(str(file_path))
-        extracted_data["resume_url"] = resume_url
+        extracted_data["resume_url"] = inline_url # Save the modified URL
         print("[DEBUG] Resume processed successfully.")
         
         # Store in vector DB

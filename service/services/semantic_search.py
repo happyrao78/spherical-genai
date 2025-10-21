@@ -141,5 +141,6 @@ Respond with ONLY a number between 0-100. No explanation."""
                 return max(0, min(100, score))
             
             return 50
-        except:
+        except Exception as e:
+            print(f"Error calculating job match: {e}")
             return 50
