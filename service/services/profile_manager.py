@@ -19,6 +19,7 @@ class ProfileManager:
             "email": profile_data.get('email', ''),
             "phone": profile_data.get('phone', ''),
             "raw_text": profile_data.get('raw_text', ''),
+            "resume_url": profile_data.get('resume_url', ''), # Add this line
         }
         
         # Upsert profile
@@ -55,4 +56,3 @@ class ProfileManager:
             except Exception as e:
                 print(f"Error fetching distinct user_ids: {e}")
                 return [] # Return empty list on error
-

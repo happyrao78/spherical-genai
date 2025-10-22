@@ -1,23 +1,110 @@
 const express = require('express');
 const Job = require('../models/Job');
 const Application = require('../models/Application');
-const User = require('../models/User'); // Ensure User model is imported
-const { protect, adminOnly, superAdminOnly } = require('../middleware/auth'); // Import all middlewares
-const axios = require('axios'); // Ensure axios is imported
+const User = require('../models/User');
+const Profile = require('../models/Profile'); // Ensure Profile model is imported
+const { protect, adminOnly, superAdminOnly } = require('../middleware/auth');
+const axios = require('axios');
+const bcrypt = require('bcryptjs');
 
 const router = express.Router();
 
-// All routes require admin authentication first
+// Apply authentication and admin role checks to all routes in this file
 router.use(protect);
-router.use(adminOnly); // Then ensure the user is at least a regular admin
+router.use(adminOnly);
+
+// --- Application Routes ---
+router.get('/applications', async (req, res) => {
+  console.log("\n[SERVER] /admin/applications: Request received.");
+  try {
+    // **Declare applicationFilter here with a default value**
+    let applicationFilter = {};
+
+    // Only apply the filter if the user is NOT the super admin
+    if (req.user.email !== process.env.ADMIN_EMAIL) {
+      console.log("[SERVER-DEBUG] /admin/applications: Non-super admin detected. Filtering jobs.");
+      const adminJobs = await Job.find({ postedBy: req.user._id }).select('_id').lean();
+      const adminJobIds = adminJobs.map(job => job._id);
+      applicationFilter.job = { $in: adminJobIds };
+    } else {
+      console.log("[SERVER-DEBUG] /admin/applications: Super admin detected. No job filter applied.");
+    }
+
+    // Fetch applications, populating necessary details
+    let applications = await Application.find(applicationFilter) // Now applicationFilter always exists
+      .populate('candidate', 'name email') // Get candidate name and email
+      .populate({
+        path: 'job',
+        select: 'title postedBy', // Select title and postedBy from Job
+        populate: { path: 'postedBy', select: 'name' } // Populate postedBy within Job
+      })
+      .sort({ createdAt: -1 })
+      .lean(); // Use lean for performance as we modify the objects
+
+    console.log(`[SERVER-DEBUG] /admin/applications: Found ${applications.length} raw applications matching filter.`);
+
+    // --- START: Fetch and Merge Resume URLs ---
+    if (applications.length > 0) {
+      // Get unique, valid candidate IDs
+      const candidateIds = [
+        ...new Set( // Use Set to get unique IDs
+          applications
+            .map(app => app.candidate?._id?.toString()) // Safely access _id and convert to string
+            .filter(id => id) // Filter out any null/undefined IDs
+        )
+      ];
+
+      console.log(`[SERVER-DEBUG] /admin/applications: Extracted ${candidateIds.length} unique candidate IDs for profile lookup:`, candidateIds);
+
+      if (candidateIds.length > 0) {
+        // Fetch corresponding profiles
+        const profiles = await Profile.find({ user_id: { $in: candidateIds } })
+          .select('user_id resume_url')
+          .lean();
+        console.log(`[SERVER-DEBUG] /admin/applications: Found ${profiles.length} profiles for these candidates.`);
+
+        // Create a map for efficient lookup
+        const profileMap = profiles.reduce((map, profile) => {
+          map[profile.user_id] = profile.resume_url;
+          return map;
+        }, {});
+        console.log(`[SERVER-DEBUG] /admin/applications: Created profileMap.`);
+
+        // Merge the resumeUrl into each application
+        applications = applications.map(app => {
+          const candidateIdString = app.candidate?._id?.toString();
+          const resumeUrl = candidateIdString ? profileMap[candidateIdString] || null : null;
+          console.log(`[SERVER-DEBUG] /admin/applications: App ID ${app._id}, Candidate ID ${candidateIdString}, Found resumeUrl: ${resumeUrl ? 'Yes' : 'No'}`);
+          return { ...app, resumeUrl };
+        });
+        console.log("[SERVER-DEBUG] /admin/applications: Finished merging resume URLs.");
+      } else {
+        console.log("[SERVER-DEBUG] /admin/applications: No valid candidate IDs found in applications to fetch profiles for.");
+        // Ensure resumeUrl is at least null if no candidates
+        applications = applications.map(app => ({ ...app, resumeUrl: null }));
+      }
+    } else {
+      console.log("[SERVER-DEBUG] /admin/applications: No applications found to process.");
+    }
+    // --- END: Fetch and Merge Resume URLs ---
+    console.log(">>> FINAL Applications Data:", JSON.stringify(applications, null, 2));
+    res.json({ applications });
+
+  } catch (error) {
+    console.error('[SERVER] Error fetching admin applications:', error);
+    res.status(500).json({ message: 'Server error fetching applications', error: error.message });
+  }
+});
 
 // --- Job Routes ---
-
-// Create job (POST /jobs) - Accessible by all admins
 router.post('/jobs', async (req, res) => {
+  console.log("\n[SERVER] Received request POST /admin/jobs");
   try {
     const { title, company, description, role, salary, requirements } = req.body;
-
+    if (!title || !company || !description || !role || !salary) {
+      console.warn("[SERVER-WARN] /admin/jobs: Missing required fields in request body:", req.body);
+      return res.status(400).json({ message: 'Missing required job fields: title, company, description, role, salary' });
+    }
     const job = await Job.create({
       title,
       company,
@@ -25,289 +112,175 @@ router.post('/jobs', async (req, res) => {
       role,
       salary,
       requirements,
-      postedBy: req.user._id, // Assign the logged-in admin's ID
+      postedBy: req.user._id // Associate job with the logged-in admin
     });
-
+    console.log(`[SERVER-INFO] /admin/jobs: Job created successfully with ID: ${job._id}`);
     res.status(201).json({ message: 'Job created successfully', job });
   } catch (error) {
-    if (error.name === 'ValidationError') {
-        return res.status(400).json({ message: 'Validation Error', errors: error.errors });
-    }
-    console.error('Error creating job:', error);
+    console.error('[SERVER] Error creating job:', error);
     res.status(500).json({ message: 'Server error creating job', error: error.message });
   }
 });
 
-// Get jobs (admin view) (GET /jobs) - Filtered for regular admins
 router.get('/jobs', async (req, res) => {
+  console.log("\n[SERVER] Received request GET /admin/jobs");
   try {
     let query = {};
-    const isSuperAdmin = req.user.email === process.env.ADMIN_EMAIL;
-
-    // If the logged-in user is NOT the super admin, filter by postedBy
-    if (!isSuperAdmin) {
+    // Super admin sees all jobs, other admins see only their own
+    if (req.user.email !== process.env.ADMIN_EMAIL) {
+      console.log(`[SERVER-DEBUG] /admin/jobs: Filtering jobs for admin: ${req.user.email}`);
       query.postedBy = req.user._id;
-      console.log(`Filtering jobs for regular admin: ${req.user.email}`);
     } else {
-        console.log(`Fetching all jobs for super admin: ${req.user.email}`);
+      console.log(`[SERVER-DEBUG] /admin/jobs: Super admin detected. Fetching all jobs.`);
     }
-
-
     const jobs = await Job.find(query)
-      .populate('postedBy', 'name email') // Optionally populate creator details
+      .populate('postedBy', 'name email') // Populate creator details
       .sort({ createdAt: -1 })
-      .lean(); // Use lean
-
+      .lean();
+    console.log(`[SERVER-INFO] /admin/jobs: Fetched ${jobs.length} jobs.`);
     res.json({ jobs });
   } catch (error) {
-    console.error('Error fetching admin jobs:', error);
+    console.error('[SERVER] Error fetching admin jobs:', error);
     res.status(500).json({ message: 'Server error fetching jobs', error: error.message });
   }
 });
 
-// --- Application Routes ---
-
-// Get applications (GET /applications) - Filtered for regular admins
-router.get('/applications', async (req, res) => {
-  console.log('Fetching applications for admin...');
-  try {
-    let applicationFilter = {}; // Filter for the Application query
-    const isSuperAdmin = req.user.email === process.env.ADMIN_EMAIL;
-
-    if (!isSuperAdmin) {
-      // Find only job IDs posted by the current regular admin
-      const adminJobs = await Job.find({ postedBy: req.user._id }).select('_id').lean();
-      const adminJobIds = adminJobs.map(job => job._id);
-      // Filter applications where the 'job' field is in the list of admin's job IDs
-      applicationFilter.job = { $in: adminJobIds };
-       console.log(`Filtering applications for regular admin ${req.user.email} based on ${adminJobIds.length} jobs.`);
-    } else {
-         console.log(`Fetching all applications for super admin ${req.user.email}.`);
-    }
-
-    // Fetch applications matching the filter (all for super admin, filtered for regular admin)
-    const applications = await Application.find(applicationFilter) // Apply the filter here
-      .populate('candidate', 'name email')
-      .populate({
-            path: 'job',
-            select: 'title company description role requirements postedBy', // Include postedBy ID
-       })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    console.log(`Found ${applications.length} applications matching filter.`);
-
-    // --- Batch Score Calculation (remains the same as previous implementation) ---
-    if (applications.length === 0) {
-      return res.json({ applications: [] });
-    }
-
-    // Group applications by candidate ID
-    const appsByCandidate = applications.reduce((groups, app) => {
-      if (app.candidate && app.candidate._id) {
-        const candidateId = app.candidate._id.toString();
-        if (!groups[candidateId]) {
-          groups[candidateId] = [];
-        }
-        // Only add if job data is present (it should be after populate)
-        if (app.job) {
-             groups[candidateId].push(app);
-        } else {
-             console.warn(`Application ${app._id} skipped for scoring due to missing job data.`);
-        }
-
-      }
-      return groups;
-    }, {});
-
-    console.log(`Grouped applications for ${Object.keys(appsByCandidate).length} candidates for scoring.`);
-
-    const applicationsWithScores = [];
-    const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
-
-    // Process scores for each candidate separately
-    for (const candidateId in appsByCandidate) {
-      const candidateApps = appsByCandidate[candidateId];
-      // console.log(`Processing ${candidateApps.length} apps for candidate ${candidateId}`); // Can be noisy
-
-      const batchPayload = {
-        user_id: candidateId,
-        jobs: candidateApps
-          .map(app => ({ // Already filtered for existing app.job above
-            job_id: app.job._id.toString(),
-            role: app.job.role,
-            description: app.job.description,
-            requirements: app.job.requirements || '',
-          })),
-      };
-
-      if (batchPayload.jobs.length === 0) {
-         // This case should ideally not happen due to prior filtering, but good to keep
-         console.log(`No valid jobs to score for candidate ${candidateId}, assigning 0 score`);
-         candidateApps.forEach(app => applicationsWithScores.push({ ...app, matchScore: 0 }));
-         continue;
-      }
-
-      try {
-        const scoresRes = await axios.post(`${pythonApiUrl}/calculate-batch-job-match`, batchPayload, {
-          headers: { Authorization: req.headers.authorization },
-        });
-        const scoresData = scoresRes.data;
-
-        const scoreMap = scoresData.reduce((map, item) => {
-          map[item.job_id] = item.matchScore;
-          return map;
-        }, {});
-
-        candidateApps.forEach(app => {
-          const score = (scoreMap[app.job._id.toString()] !== undefined)
-                          ? scoreMap[app.job._id.toString()]
-                          : 0;
-          applicationsWithScores.push({ ...app, matchScore: score });
-        });
-        // console.log(`Scores calculated for candidate ${candidateId}`); // Can be noisy
-
-      } catch (error) {
-        console.error(`Error calculating batch scores for candidate ${candidateId}:`, error.message);
-        candidateApps.forEach(app => applicationsWithScores.push({ ...app, matchScore: 0 }));
-      }
-    }
-
-    // Re-sort the final list by date as batching might change order
-    applicationsWithScores.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    console.log('Applications with scores ready to send.');
-    res.json({ applications: applicationsWithScores });
-
-  } catch (error) {
-    console.error('Error fetching admin applications:', error);
-    res.status(500).json({ message: 'Server error fetching applications', error: error.message });
-  }
-});
-
-// Update application status (PUT /applications/:id) - Accessible by all admins (consider scoping later if needed)
-router.put('/applications/:id', async (req, res) => {
-    // Note: This currently allows any admin to update status for any application they can see.
-    // If you need to restrict this to only the admin who posted the job, you'd add a check here
-    // comparing req.user._id to the application's job.postedBy field.
-  try {
-    const { status } = req.body;
-    if (!['pending', 'reviewed', 'accepted', 'rejected'].includes(status)) {
-         return res.status(400).json({ message: 'Invalid status value' });
-    }
-
-    const application = await Application.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true } // Return the updated document
-    ).lean(); // Use lean
-
-     if (!application) {
-        return res.status(404).json({ message: 'Application not found' });
-     }
-
-
-    // Optional: Add check here if needed:
-    // const job = await Job.findById(application.job).select('postedBy').lean();
-    // if (req.user.email !== process.env.ADMIN_EMAIL && job.postedBy.toString() !== req.user._id.toString()) {
-    //    return res.status(403).json({ message: 'Cannot update status for job posted by another admin.' });
-    // }
-
-
-    res.json({ message: 'Application updated', application });
-  } catch (error) {
-     console.error('Error updating application status:', error);
-    res.status(500).json({ message: 'Server error updating application', error: error.message });
-  }
-});
-
-
-// --- Candidate/User Routes ---
-
-// Get candidates who have uploaded resumes (GET /candidates-with-resumes) - Accessible by all admins
+// --- Candidate Info Route ---
 router.get('/candidates-with-resumes', async (req, res) => {
-  console.log('Fetching candidates with resumes...');
+  console.log("\n[SERVER] Received request for /admin/candidates-with-resumes");
   try {
+    // 1. Get user_ids from Python service
     const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
-    let userIds = [];
-    try {
-      const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, {
-        headers: { Authorization: req.headers.authorization },
-      });
-      userIds = pythonRes.data || [];
-      console.log(`Received ${userIds.length} user IDs from Python service.`);
-    } catch (pyError) {
-      console.error('Error fetching user IDs from Python service:', pyError.message);
-    }
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Calling Python service at ${pythonApiUrl}/admin/resumes/user-ids`);
+    const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
+    const userIdsFromPython = pythonRes.data || [];
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Fetched ${userIdsFromPython.length} user IDs from Python.`);
 
-    if (userIds.length === 0) {
+    if (userIdsFromPython.length === 0) {
+      console.log("[SERVER-DEBUG] /admin/candidates-with-resumes: No user IDs from Python, returning empty list.");
       return res.json({ candidates: [] });
     }
 
-    const candidates = await User.find({
-      _id: { $in: userIds },
-      role: 'candidate',
-    })
-    .select('name email createdAt')
-    .sort({ createdAt: -1 })
-    .lean();
+    // 2. Fetch User details for these IDs
+    const candidates = await User.find({ _id: { $in: userIdsFromPython }, role: 'candidate' }) // Ensure role is candidate
+      .select('name email createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Found ${candidates.length} User documents matching IDs and role.`);
 
-    console.log(`Found ${candidates.length} candidate details in Node DB.`);
+    // --- START: Fetch and Merge Resume URLs ---
+    // 3. Get the string IDs from the found candidates for the Profile query
+    const candidateIdsForProfileQuery = candidates.map(c => c._id.toString());
+
+    if (candidateIdsForProfileQuery.length === 0) {
+      console.log("[SERVER-DEBUG] /admin/candidates-with-resumes: No candidate users found in DB for Python IDs.");
+      return res.json({ candidates: [] });
+    }
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: User IDs for profile query:`, candidateIdsForProfileQuery);
+
+    // 4. Fetch corresponding Profiles using user_id string
+    const profiles = await Profile.find({ user_id: { $in: candidateIdsForProfileQuery } })
+      .select('user_id resume_url')
+      .lean();
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Found ${profiles.length} profiles for these users.`);
+
+    // 5. Create a map for easy lookup (userId -> resumeUrl)
+    const profileMap = profiles.reduce((map, profile) => {
+      map[profile.user_id] = profile.resume_url;
+      return map;
+    }, {});
+    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Created profileMap.`);
+
+    // 6. Add resumeUrl to each candidate object
+    const candidatesWithResumes = candidates.map(candidate => {
+      const resumeUrl = profileMap[candidate._id.toString()] || null;
+      console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Candidate ID ${candidate._id.toString()}, Found resumeUrl: ${resumeUrl ? 'Yes' : 'No'}`);
+      return { ...candidate, resumeUrl };
+    });
+    console.log("[SERVER-DEBUG] /admin/candidates-with-resumes: Finished merging resume URLs.");
+    // --- END: Fetch and Merge Resume URLs ---
+    console.log(">>> FINAL Candidates Data:", JSON.stringify(candidatesWithResumes, null, 2));
+
+    res.json({ candidates: candidatesWithResumes }); // Send the merged data
+
+  } catch (error) {
+    console.error('[SERVER] Error fetching candidates with resumes:', error);
+    // Provide more detailed error response, especially for connection errors
+    if (error.code === 'ECONNREFUSED') {
+      console.error('[SERVER-FATAL] /admin/candidates-with-resumes: Connection to Python service refused. Is the Python service running?');
+      return res.status(503).json({ message: 'Service unavailable: Cannot connect to resume service.' });
+    }
+    res.status(500).json({
+      message: 'Server error fetching candidates',
+      error: error.message,
+      code: error.code, // Include error code if available
+      response: error.response?.data // Include Python API error if available
+    });
+  }
+});
+
+
+// --- Super Admin User Management Routes ---
+
+// Get Candidate Users (for potential promotion - REMOVED, keep for viewing maybe?)
+router.get('/users/candidates', superAdminOnly, async (req, res) => {
+  console.log("\n[SERVER] Received request GET /admin/users/candidates");
+  try {
+    const candidates = await User.find({ role: 'candidate' })
+      .select('name email _id createdAt') // Added createdAt
+      .sort({ name: 1 })
+      .lean();
+    console.log(`[SERVER-INFO] /admin/users/candidates: Fetched ${candidates.length} candidates.`);
     res.json({ candidates });
   } catch (error) {
-    console.error('Error fetching candidates with resumes:', error);
+    console.error('[SERVER] Error fetching candidate users:', error);
     res.status(500).json({ message: 'Server error fetching candidates', error: error.message });
   }
 });
 
-// --- Super Admin Only Routes ---
-
-// Promote User to Admin (POST /users/promote/:userId) - Super Admin Only
-router.post('/users/promote/:userId', superAdminOnly, async (req, res) => {
+// Create a New Admin Directly
+router.post('/users/create-admin', superAdminOnly, async (req, res) => {
+  console.log("\n[SERVER] Received request POST /admin/users/create-admin");
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    console.warn("[SERVER-WARN] /admin/users/create-admin: Missing required fields:", req.body);
+    return res.status(400).json({ message: 'Missing required fields: name, email, password' });
+  }
   try {
-    const userIdToPromote = req.params.userId;
-    const user = await User.findById(userIdToPromote);
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      console.warn(`[SERVER-WARN] /admin/users/create-admin: User already exists with email: ${email}`);
+      return res.status(400).json({ message: 'User already exists with this email.' });
     }
-
-    if (user.email === process.env.ADMIN_EMAIL || user.role === 'admin') {
-      return res.status(400).json({ message: 'Cannot promote this user' });
-    }
-
-    user.role = 'admin';
-    await user.save();
-
-    console.log(`User ${user.email} promoted to admin by ${req.user.email}`);
-    // Return lean user object without sensitive fields
-    const promotedUserInfo = {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-    };
-    res.json({ message: 'User successfully promoted to admin', user: promotedUserInfo });
-
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newAdmin = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role: 'admin',
+      isVerified: true // Admins created directly are considered verified
+    });
+    console.log(`[SERVER-INFO] /admin/users/create-admin: Admin created successfully: ${email} (ID: ${newAdmin._id})`);
+    res.status(201).json({ message: 'Admin created successfully.' });
   } catch (error) {
-    console.error('Error promoting user:', error);
-    res.status(500).json({ message: 'Server error promoting user', error: error.message });
+    console.error('[SERVER] Error creating admin:', error);
+    res.status(500).json({ message: 'Server error creating admin.', error: error.message });
   }
 });
 
-// Get candidate users for promotion list (GET /users/candidates) - Super Admin Only
- router.get('/users/candidates', superAdminOnly, async (req, res) => {
-   try {
-     const candidates = await User.find({ role: 'candidate' })
-       .select('name email _id createdAt') // Include _id
-       .sort({ name: 1 })
-       .lean();
-     res.json({ candidates });
-   } catch (error) {
-     console.error('Error fetching candidates for promotion:', error);
-     res.status(500).json({ message: 'Server error fetching candidates' });
-   }
- });
-
-
+// Get Current Admins (excluding the super admin)
+router.get('/users/admins', superAdminOnly, async (req, res) => {
+  console.log("\n[SERVER] Received request GET /admin/users/admins");
+  try {
+    // Find admins whose email does not match the super admin email
+    const admins = await User.find({ role: 'admin', email: { $ne: process.env.ADMIN_EMAIL } })
+      .select('name email _id') // Select only necessary fields
+      .lean();
+    console.log(`[SERVER-INFO] /admin/users/admins: Fetched ${admins.length} non-super admins.`);
+    res.json({ admins });
+  } catch (error) {
+    console.error('[SERVER] Error fetching admins:', error);
+    res.status(500).json({ message: 'Server error fetching admins', error: error.message });
+  }
+});
 module.exports = router;
