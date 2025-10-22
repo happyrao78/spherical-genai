@@ -20,19 +20,11 @@ load_dotenv()
 
 app = FastAPI()
 
-# --- Start Debugging: Check Cloudinary Config ---
-print("--- Cloudinary Configuration ---")
+# --- Cloudinary Configuration ---
 cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
 api_key = os.getenv("CLOUDINARY_API_KEY")
 api_secret = os.getenv("CLOUDINARY_API_SECRET")
 
-print(f"Cloud Name: {'Loaded' if cloud_name else 'Not Found'}")
-print(f"API Key: {'Loaded' if api_key else 'Not Found'}")
-print(f"API Secret: {'Loaded' if api_secret else 'Not Found'}")
-print("---------------------------------")
-# --- End Debugging ---
-
-# Configure Cloudinary
 cloudinary.config(
     cloud_name=cloud_name,
     api_key=api_key,
@@ -40,13 +32,22 @@ cloudinary.config(
 )
 
 
-# CORS
+# --- CORS Configuration ---
+# Define allowed origins
+origins = [
+    "http://localhost:5173",  # Allow local client development server
+    "http://localhost:5174",  # Allow local admin development server
+    "https://spherical-genai.vercel.app",  # Allow your deployed client app
+    "https://spherical-genai-f6eq.vercel.app",  # Allow your deployed admin app
+    # Add any other origins if needed
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173","http://localhost:5174"],
+    allow_origins=origins, # Use the list of allowed origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"], # Allows all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"], # Allows all headers
 )
 
 
@@ -61,14 +62,15 @@ profile_manager = ProfileManager()
 semantic_search = SemanticSearch(vector_db)
 
 
+# --- Pydantic Models ---
 class JobData(BaseModel):
-    job_id: str 
+    job_id: str
     role: Optional[str] = None
     description: Optional[str] = None
     requirements: Optional[str] = None
 
 class BatchMatchRequest(BaseModel):
-    user_id: Optional[str] = None 
+    user_id: Optional[str] = None
     jobs: List[JobData]
 
 class BatchMatchResponseItem(BaseModel):
@@ -84,6 +86,7 @@ class SearchQuery(BaseModel):
     query: str
 
 
+# --- API Endpoints ---
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
@@ -99,19 +102,19 @@ async def upload_resume(
     if not user_id:
         print("[DEBUG] Unauthorized access detected.")
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     print(f"[DEBUG] User authenticated: {user_id}")
-    
+
     file_path = TEMP_DIR / resume.filename
     print(f"[DEBUG] Temporary file path: {file_path}")
-    
+
     try:
         # Save the file locally first
         with open(file_path, "wb") as f:
             content = await resume.read()
             f.write(content)
         print(f"[DEBUG] File '{resume.filename}' saved locally.")
-            
+
         # Upload to Cloudinary
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
@@ -120,46 +123,43 @@ async def upload_resume(
             folder="resumes",
             access_mode="public"
         )
-        
+
         print("\n--- Cloudinary Upload Result ---")
         print(upload_result)
         print("--------------------------------\n")
-        
+
         secure_url = upload_result.get("secure_url")
 
         if not secure_url:
             print("[DEBUG] ERROR: 'secure_url' not found in Cloudinary response.")
             raise HTTPException(status_code=500, detail="Could not upload resume to cloud storage.")
 
-        # --- START: CORRECTED CODE ---
-        # Use the original secure_url directly for raw files
         resume_url_to_save = secure_url
         print(f"[SERVICE-DEBUG] Using original secure_url: {resume_url_to_save}")
-        # --- END: CORRECTED CODE ---
 
         # Process resume text
         extracted_data = process_resume(str(file_path))
         extracted_data["resume_url"] = resume_url_to_save # Save the original URL
         print("[DEBUG] Resume processed successfully.")
-        
+
         # Store in vector DB
         vector_db.upsert_candidate(user_id, extracted_data)
         print("[DEBUG] Candidate data upserted to vector DB.")
-        
+
         # Save profile to MongoDB
         profile_manager.create_or_update_profile(user_id, extracted_data)
         print("[DEBUG] Profile saved to MongoDB.")
-        
+
         print("--- Resume upload process completed successfully ---\n")
         return {"message": "Resume processed successfully", "data": extracted_data}
-        
+
     except Exception as e:
         print(f"\n--- AN ERROR OCCURRED ---")
         print(f"Exception Type: {type(e).__name__}")
         print(f"Error Details: {e}")
         print("--------------------------\n")
         raise HTTPException(status_code=500, detail=f"Error processing resume: {str(e)}")
-        
+
     finally:
         # Clean up the temporary file
         try:
@@ -175,7 +175,7 @@ async def get_profile(authorization: str = Header(None)):
     user_id = verify_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     profile = profile_manager.get_profile(user_id)
     return {"profile": profile}
 
@@ -188,13 +188,33 @@ async def update_profile(
     user_id = verify_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    updated_profile = profile_manager.update_profile(user_id, profile_data.dict(exclude_unset=True))
-    
-    # Update vector DB
-    vector_db.upsert_candidate(user_id, updated_profile)
-    
-    return {"message": "Profile updated successfully", "profile": updated_profile}
+
+    # Fetch existing profile to merge updates correctly
+    existing_profile = profile_manager.get_profile(user_id)
+    if not existing_profile:
+        # Handle case where profile doesn't exist yet, maybe create it?
+        # For now, let's assume update only happens if profile exists
+        # Or, just pass the updates directly:
+        updated_data_for_mongo = profile_data.dict(exclude_unset=True)
+    else:
+        # Merge existing with new, ensuring unset fields aren't overwritten with None
+        updated_data_for_mongo = existing_profile.copy()
+        update_dict = profile_data.dict(exclude_unset=True)
+        updated_data_for_mongo.update(update_dict)
+
+
+    updated_profile_mongo = profile_manager.update_profile(user_id, updated_data_for_mongo)
+
+    # Re-fetch the fully updated profile data for VectorDB upsert
+    full_updated_profile = profile_manager.get_profile(user_id)
+    if full_updated_profile:
+      # Update vector DB with the complete, merged profile data
+      vector_db.upsert_candidate(user_id, full_updated_profile)
+    else:
+      print(f"[WARN] Profile {user_id} not found after update for VectorDB upsert.")
+
+
+    return {"message": "Profile updated successfully", "profile": full_updated_profile}
 
 
 @app.post("/api/semantic-search")
@@ -205,7 +225,7 @@ async def semantic_search_endpoint(
     user_id = verify_token(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     results = semantic_search.search(query.query)
     return {"results": results}
 
@@ -227,10 +247,10 @@ async def calculate_job_match(
     if not profile:
         return {"matchScore": 0}
 
-    # The job data might be nested under 'job_data' if coming from the admin
+    # The job data might be nested under 'job_data' if coming from Node/Admin
     job_data = data.get('job_data', data)
 
-    # Calculate match using semantic search
+    # Combine job details for requirements string
     job_requirements = f"{job_data.get('role', '')} {job_data.get('description', '')} {job_data.get('requirements', '')}"
 
     try:
@@ -238,8 +258,7 @@ async def calculate_job_match(
         return {"matchScore": match_score}
     except Exception as e:
         print(f"Error calculating match: {e}")
-        return {"matchScore": 0}
-
+        return {"matchScore": 0} # Return default score on error
 
 
 @app.get("/api/admin/resumes/user-ids", response_model=List[str])
@@ -247,14 +266,13 @@ async def get_user_ids_with_resumes(
     authorization: str = Header(None)
 ):
     """Returns a list of user_ids that have uploaded resumes (have profiles)"""
-    # Ensure it's an admin making the request (basic check)
+    # Basic check - ensure a valid token exists
     admin_id = verify_token(authorization)
-    if not admin_id: # A more robust check might verify admin role via Node API
+    if not admin_id: # A more robust check might verify admin role via Node API if needed
          raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:
-        # Fetch user_ids from the profiles collection
-        # Assumes a profile exists only if a resume was uploaded
+        # Fetch distinct user_ids from the profiles collection
         user_ids = profile_manager.get_all_profile_user_ids()
         return user_ids
     except Exception as e:
@@ -281,7 +299,7 @@ async def calculate_batch_job_match(
         return [BatchMatchResponseItem(job_id=job.job_id, matchScore=0) for job in request_data.jobs]
 
     results = []
-    # Calculate score for each job sequentially (can be parallelized later if needed)
+    # Calculate score for each job sequentially
     for job in request_data.jobs:
         job_requirements = f"{job.role or ''} {job.description or ''} {job.requirements or ''}"
         score = 0 # Default score
@@ -296,7 +314,9 @@ async def calculate_batch_job_match(
     return results
 
 
-
+# --- Main execution ---
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Use PORT environment variable provided by Railway, default to 8000 locally
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
