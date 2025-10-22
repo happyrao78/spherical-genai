@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
-import { Briefcase, Users, Search, LogOut, Plus, Loader, FileText, UserPlus, AlertCircle, UserMinus, ExternalLink } from 'lucide-react';
+import { Briefcase, Users, Search, LogOut, Plus, Loader, FileText, UserPlus, AlertCircle, ExternalLink } from 'lucide-react';
 
 const Dashboard = () => {
   const { admin, logout } = useAuth();
@@ -39,14 +39,12 @@ const Dashboard = () => {
       if (admin.isSuperAdmin) {
         fetchAdmins();
       } else {
-        setCandidateUsers([]);
         setAdmins([]);
       }
     } else {
       setJobs([]);
       setApplications([]);
       setCandidates([]);
-      setCandidateUsers([]);
       setAdmins([]);
     }
   }, [admin]);
@@ -80,7 +78,6 @@ const Dashboard = () => {
       setLoadingError('Could not load candidates list. Please try again later.');
     }
   };
-
 
   const fetchAdmins = async () => {
     if (!admin?.isSuperAdmin) return;
@@ -223,6 +220,7 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* JOBS TAB */}
         {activeTab === 'jobs' && (
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-6">
@@ -350,6 +348,7 @@ const Dashboard = () => {
           </div>
         )}
 
+        {/* APPLICATIONS TAB */}
         {activeTab === 'applications' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Applications {admin?.isSuperAdmin ? '(All)' : '(For My Jobs)'}</h2>
@@ -359,48 +358,72 @@ const Dashboard = () => {
               ) : (
                 applications.map((app) => (
                   <div key={app._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                     <div className="flex justify-between items-start mb-2">
+                    <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <h3 className="text-lg font-semibold text-gray-900">{app.candidate?.name || 'N/A'}</h3>
                         <p className="text-gray-600 text-sm">{app.candidate?.email || 'N/A'}</p>
                         <p className="text-purple-600 font-medium mt-2 text-sm">Applied for: {app.job?.title || 'N/A'}</p>
-                         {admin?.isSuperAdmin && app.job?.postedBy && (
-                            <p className="text-xs text-gray-500 mt-1">Job posted by: {app.job.postedBy.name}</p>
-                         )}
-                         {app.resumeUrl && (
-                            <a
-                                href={app.resumeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
-                            >
-                                <ExternalLink className="h-4 w-4 mr-1" />
-                                View Resume
-                            </a>
+                        {admin?.isSuperAdmin && app.job?.postedBy && (
+                          <p className="text-xs text-gray-500 mt-1">Job posted by: {app.job.postedBy.name}</p>
+                        )}
+                        {app.resumeUrl && (
+                          <a
+                            href={app.resumeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            View Resume
+                          </a>
                         )}
                       </div>
                       <div className="flex flex-col items-end space-y-1">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${ app.status === 'accepted' ? 'bg-green-100 text-green-800' : app.status === 'rejected' ? 'bg-red-100 text-red-800' : app.status === 'reviewed' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800' }`}>
-                           {app.status}
-                          </span>
-                           {app.matchScore !== undefined && (
-                            <div className="ml-4 text-center mt-2">
-                                <div className={`text-2xl font-bold ${getMatchColor(app.matchScore)}`}>{app.matchScore}%</div>
-                                <div className="text-xs text-gray-500">Match</div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            app.status === 'accepted'
+                              ? 'bg-green-100 text-green-800'
+                              : app.status === 'rejected'
+                              ? 'bg-red-100 text-red-800'
+                              : app.status === 'reviewed'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {app.status}
+                        </span>
+                        {app.matchScore !== undefined && (
+                          <div className="ml-4 text-center mt-2">
+                            <div className={`text-2xl font-bold ${getMatchColor(app.matchScore)}`}>
+                              {app.matchScore}%
                             </div>
-                           )}
+                            <div className="text-xs text-gray-500">Match</div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                     {app.matchScore !== undefined && (
-                         <div className="mt-3">
-                            <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700">Eligibility Score</span>
-                                <span className={`text-sm font-semibold ${getMatchColor(app.matchScore)}`}>
-                                {app.matchScore >= 80 ? 'Excellent' : app.matchScore >= 60 ? 'Good' : app.matchScore >= 40 ? 'Fair' : 'Low'} Match
-                                </span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2.5"><div className={`h-2.5 rounded-full ${getMatchBgColor(app.matchScore)}`} style={{ width: `${app.matchScore}%` }}/></div>
+                    {app.matchScore !== undefined && (
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-700">Eligibility Score</span>
+                          <span className={`text-sm font-semibold ${getMatchColor(app.matchScore)}`}>
+                            {app.matchScore >= 80
+                              ? 'Excellent'
+                              : app.matchScore >= 60
+                              ? 'Good'
+                              : app.matchScore >= 40
+                              ? 'Fair'
+                              : 'Low'}{' '}
+                            Match
+                          </span>
                         </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                          <div
+                            className={`h-2.5 rounded-full ${getMatchBgColor(app.matchScore)}`}
+                            style={{ width: `${app.matchScore}%` }}
+                          />
+                        </div>
+                      </div>
                     )}
                   </div>
                 ))
@@ -409,51 +432,73 @@ const Dashboard = () => {
           </div>
         )}
 
+        {/* CANDIDATES TAB */}
         {activeTab === 'candidates' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Candidates with Uploaded Resumes</h2>
             <div className="space-y-4">
-              {candidates.length === 0 ? (<p className="text-gray-600">No candidates have uploaded resumes yet.</p>) : (
+              {candidates.length === 0 ? (
+                <p className="text-gray-600">No candidates have uploaded resumes yet.</p>
+              ) : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
-                     <thead className="bg-gray-50">
-                          <tr>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Registered On</th>
-                          </tr>
-                        </thead>
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          Name
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          Email
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          Registered On
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          Resume
+                        </th>
+                      </tr>
+                    </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {candidates.map((candidate) => (
                         <tr key={candidate._id}>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{candidate.name}</td>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{candidate.email}</td>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(candidate.createdAt)}</td>
-
-
-<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-        {candidate.resumeUrl ? (
-          <a
-            href={candidate.resumeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center text-blue-600 hover:underline"
-          >
-            <ExternalLink className="h-4 w-4 mr-1" />
-            View
-          </a>
-        ) : (
-          <span className="text-gray-400">No Resume Link</span>
-        )}
-     </td>
-
-
-
-
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {candidate.name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {candidate.email}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {formatDate(candidate.createdAt)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {candidate.resumeUrl ? (
+                              <a
+                                href={candidate.resumeUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-blue-600 hover:underline"
+                              >
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                View
+                              </a>
+                            ) : (
+                              <span className="text-gray-400">No Resume Link</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
-
-                      
                     </tbody>
                   </table>
                 </div>
@@ -462,11 +507,12 @@ const Dashboard = () => {
           </div>
         )}
 
+        {/* SEMANTIC SEARCH TAB */}
         {activeTab === 'search' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Semantic Candidate Search</h2>
             <form onSubmit={handleSemanticSearch} className="mb-6">
-               <div className="flex gap-2">
+              <div className="flex gap-2">
                 <input
                   type="text"
                   value={searchQuery}
@@ -485,93 +531,187 @@ const Dashboard = () => {
               </div>
             </form>
             <div className="space-y-4">
-              {searching ? ( <div className="text-center py-8"> <Loader className="h-8 w-8 animate-spin mx-auto text-purple-600" /> <p className="mt-2 text-gray-600">Searching...</p> </div> )
-              : searchResults.length === 0 && searchQuery ? (<p className="text-gray-600">No matching candidates found.</p>)
-              : searchResults.length === 0 ? (<p className="text-gray-600">Enter query to find candidates.</p>)
-              : ( searchResults.map((result, index) => (
-                    <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                         <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-900">{result.name || 'Unknown'}</h3>
-                            <p className="text-gray-600">{result.email}</p>
-                            {result.resume_url && (
-                                <a
-                                    href={result.resume_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
-                                >
-                                    <ExternalLink className="h-4 w-4 mr-1" />
-                                    View Resume
-                                </a>
-                            )}
-                            {result.skills && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Skills:</p><p className="text-gray-600">{result.skills}</p></div> )}
-                            {result.experience && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Experience:</p><p className="text-gray-600 text-sm">{result.experience}</p></div> )}
-                            {result.education && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Education:</p><p className="text-gray-600 text-sm">{result.education}</p></div> )}
-                            {result.years_experience && ( <div className="mt-2"><p className="text-sm font-medium text-gray-700">Years:</p><p className="text-gray-600">{result.years_experience}</p></div> )}
+              {searching ? (
+                <div className="text-center py-8">
+                  <Loader className="h-8 w-8 animate-spin mx-auto text-purple-600" />
+                  <p className="mt-2 text-gray-600">Searching...</p>
+                </div>
+              ) : searchResults.length === 0 && searchQuery ? (
+                <p className="text-gray-600">No matching candidates found.</p>
+              ) : searchResults.length === 0 ? (
+                <p className="text-gray-600">Enter query to find candidates.</p>
+              ) : (
+                searchResults.map((result, index) => (
+                  <div
+                    key={index}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-gray-900">{result.name || 'Unknown'}</h3>
+                        <p className="text-gray-600">{result.email}</p>
+                        {result.resume_url && (
+                          <a
+                            href={result.resume_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            View Resume
+                          </a>
+                        )}
+                        {result.skills && (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-gray-700">Skills:</p>
+                            <p className="text-gray-600">{result.skills}</p>
                           </div>
-                          <div className="ml-4 text-right">
-                            <div className="mb-2">
-                              <span className="text-xs font-medium text-gray-500">Final Score</span>
-                              <div className={`text-3xl font-bold ${getMatchColor(result.final_score)}`}>{result.final_score}%</div>
-                            </div>
-                            <div className="text-xs text-gray-500 space-y-1"><div>Vector: {result.vector_score}%</div><div>AI: {result.ai_relevancy}%</div></div>
+                        )}
+                        {result.experience && (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-gray-700">Experience:</p>
+                            <p className="text-gray-600 text-sm">{result.experience}</p>
+                          </div>
+                        )}
+                        {result.education && (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-gray-700">Education:</p>
+                            <p className="text-gray-600 text-sm">{result.education}</p>
+                          </div>
+                        )}
+                        {result.years_experience && (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-gray-700">Years:</p>
+                            <p className="text-gray-600">{result.years_experience}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="ml-4 text-right">
+                        <div className="mb-2">
+                          <span className="text-xs font-medium text-gray-500">Final Score</span>
+                          <div className={`text-3xl font-bold ${getMatchColor(result.final_score)}`}>
+                            {result.final_score}%
                           </div>
                         </div>
-                         <div className="mt-4 space-y-2">
-                            <div>
-                                <div className="flex justify-between text-xs mb-1"><span className="text-gray-600">Similarity</span><span className="font-medium">{result.vector_score}%</span></div>
-                                <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${getMatchBgColor(result.vector_score)}`} style={{ width: `${result.vector_score}%` }}/></div>
-                            </div>
-                            <div>
-                                <div className="flex justify-between text-xs mb-1"><span className="text-gray-600">AI Relevancy</span><span className="font-medium">{result.ai_relevancy}%</span></div>
-                                <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${getMatchBgColor(result.ai_relevancy)}`} style={{ width: `${result.ai_relevancy}%` }}/></div>
-                            </div>
+                        <div className="text-xs text-gray-500 space-y-1">
+                          <div>Vector: {result.vector_score}%</div>
+                          <div>AI: {result.ai_relevancy}%</div>
                         </div>
+                      </div>
                     </div>
-                 ))
+                    <div className="mt-4 space-y-2">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-600">Similarity</span>
+                          <span className="font-medium">{result.vector_score}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${getMatchBgColor(result.vector_score)}`}
+                            style={{ width: `${result.vector_score}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-600">AI Relevancy</span>
+                          <span className="font-medium">{result.ai_relevancy}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${getMatchBgColor(result.ai_relevancy)}`}
+                            style={{ width: `${result.ai_relevancy}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>
         )}
 
+        {/* MANAGE ADMINS TAB */}
         {activeTab === 'manageAdmins' && admin?.isSuperAdmin && (
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-6">Manage Admins</h2>
-            
+
             <div className="mb-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
               <h3 className="text-lg font-semibold mb-4 text-gray-800">Create New Admin</h3>
               <form onSubmit={handleCreateAdmin} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                    <input type="text" value={newAdminForm.name} onChange={(e) => setNewAdminForm({ ...newAdminForm, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                    <input
+                      type="text"
+                      value={newAdminForm.name}
+                      onChange={(e) => setNewAdminForm({ ...newAdminForm, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      required
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <input type="email" value={newAdminForm.email} onChange={(e) => setNewAdminForm({ ...newAdminForm, email: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                    <input
+                      type="email"
+                      value={newAdminForm.email}
+                      onChange={(e) => setNewAdminForm({ ...newAdminForm, email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      required
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                    <input type="password" value={newAdminForm.password} onChange={(e) => setNewAdminForm({ ...newAdminForm, password: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
+                    <input
+                      type="password"
+                      value={newAdminForm.password}
+                      onChange={(e) => setNewAdminForm({ ...newAdminForm, password: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      required
+                    />
                   </div>
                 </div>
                 <div className="text-right">
-                  <button type="submit" className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">Create Admin</button>
+                  <button
+                    type="submit"
+                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+                  >
+                    Create Admin
+                  </button>
                 </div>
               </form>
             </div>
 
             <div>
               <h3 className="text-lg font-semibold mb-4 text-gray-800">Current Admins</h3>
-               <div className="overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50"><tr><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th><th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th></tr></thead>
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th
+                        scope="col"
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        Name
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        Email
+                      </th>
+                    </tr>
+                  </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {admins.map((adminUser) => (
                       <tr key={adminUser._id}>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{adminUser.name}</td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{adminUser.email}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {adminUser.name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {adminUser.email}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -580,7 +720,6 @@ const Dashboard = () => {
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
