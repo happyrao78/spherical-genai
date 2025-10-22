@@ -16,4 +16,4 @@ const profileSchema = new mongoose.Schema({
   strict: false, // This allows documents to have extra fields not defined in the schema.
 });
 
-module.exports = mongoose.model('Profile', profileSchema);
+module.exports = mongoose.model('profiles', profileSchema);
