@@ -9,11 +9,11 @@ from dotenv import load_dotenv
 import cloudinary
 import cloudinary.uploader
 
-from services.auth import verify_token
-from services.resume_processor import process_resume
-from services.vector_db import VectorDB
-from services.profile_manager import ProfileManager
-from services.semantic_search import SemanticSearch
+from service.services.auth import verify_token
+from service.services.resume_processor import process_resume
+from service.services.vector_db import VectorDB
+from service.services.profile_manager import ProfileManager
+from service.services.semantic_search import SemanticSearch
 
 
 load_dotenv()
