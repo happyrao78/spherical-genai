@@ -10,29 +10,48 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 
 // --- CORS Configuration ---
+// NOTE: Do not include URL paths (like /login) in allowed origins. Origins are scheme + host [+ port].
 const allowedOrigins = [
-  'http://localhost:5173',                  // Allow local client development server
-  'http://localhost:5174',                  // Allow local admin development server
-  'https://spherical-genai.vercel.app',     // Allow your deployed client app
-  'https://spherical-genai-f6eq.vercel.app', // Allow your deployed admin app
+  'http://localhost:5173',                  // local client dev
+  'http://localhost:5174',                  // local admin dev
+  'https://spherical-genai.vercel.app',     // deployed client
+  'https://spherical-genai-f6eq.vercel.app',// deployed admin variant
   'https://spherical-genai-candidate.vercel.app',
-  'https://spherical-genai-employer.vercel.app/login'
-  // Add any other origins if needed
+  'https://spherical-genai-employer.vercel.app'
 ];
+
+// Allow wildcard subdomains on vercel (if you have many preview domains) by checking hostname endsWith
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // allow server-to-server, curl, mobile (no origin)
+  try {
+    const url = new URL(origin);
+    const host = url.hostname;
+    // Allow exact matches
+    if (allowedOrigins.includes(origin)) return true;
+    // Allow preview/deploy subdomains that end with '.vercel.app'
+    if (host.endsWith('.vercel.app')) return true;
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    // Or allow if the origin is in our list
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked request from origin: ${origin}`); // Log blocked origins
-      callback(new Error('Not allowed by CORS'));
-    }
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    console.warn(`CORS blocked request from origin: ${origin}`);
+    return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true // If you need to allow cookies or authorization headers
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
+
+// Ensure preflight (OPTIONS) requests are handled and return the CORS headers
+app.options('*', (req, res) => {
+  // Express + cors middleware will set necessary headers, just send 204
+  res.sendStatus(204);
+});
 
 // --- Middleware ---
 app.use(express.json()); // Middleware to parse JSON bodies
