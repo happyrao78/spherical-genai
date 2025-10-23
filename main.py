@@ -39,6 +39,8 @@ origins = [
     "http://localhost:5174",  # Allow local admin development server
     "https://spherical-genai.vercel.app",  # Allow your deployed client app
     "https://spherical-genai-f6eq.vercel.app",  # Allow your deployed admin app
+    "https://spherical-genai-employer.vercel.app/login", 
+    "https://spherical-genai-candidate.vercel.app",
     # Add any other origins if needed
 ]
 
