@@ -119,9 +119,9 @@ async def upload_resume(
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
-            resource_type="raw", # Use 'raw' for non-image files like PDFs
-            folder="resumes",
-            access_mode="public"
+            upload_preset="Genai-uploads",   # 🔹 your unsigned preset name
+            resource_type="raw",             # important for PDFs
+            folder="resumes" 
         )
 
         print("\n--- Cloudinary Upload Result ---")
