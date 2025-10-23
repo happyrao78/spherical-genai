@@ -1,8 +1,8 @@
 import google.generativeai as genai
 import os
 from typing import List, Dict
-from services.vector_db import VectorDB
-from services.profile_manager import ProfileManager
+from .vector_db import VectorDB
+from .profile_manager import ProfileManager
 
 class SemanticSearch:
     def __init__(self, vector_db: VectorDB):
