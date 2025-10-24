@@ -6,6 +6,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const jobRoutes = require('./routes/jobs');
 const adminRoutes = require('./routes/admin');
+const semanticRoutes = require('./routes/semantic');
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use(express.json()); // Middleware to parse JSON bodies
 app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/semantic-search', semanticRoutes);
 
 // --- Simple Root Route for Health Check ---
 app.get('/', (req, res) => {
