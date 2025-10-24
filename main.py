@@ -117,13 +117,15 @@ async def upload_resume(
             f.write(content)
         print(f"[DEBUG] File '{resume.filename}' saved locally.")
 
-        # Upload to Cloudinary
+        # Upload to Cloudinary using SIGNED upload (no preset needed)
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
-            upload_preset="genai-uploads",   # 🔹 your unsigned preset name
-            resource_type="raw",             # important for PDFs
-            folder="resumes" 
+            resource_type="raw",        # Important for PDFs
+            folder="resumes",           # Upload to 'resumes' folder
+            use_filename=True,          # Use original filename
+            unique_filename=True,       # Add unique identifier to prevent overwrites
+            overwrite=False             # Don't overwrite existing files
         )
 
         print("\n--- Cloudinary Upload Result ---")
@@ -141,7 +143,7 @@ async def upload_resume(
 
         # Process resume text
         extracted_data = process_resume(str(file_path))
-        extracted_data["resume_url"] = resume_url_to_save # Save the original URL
+        extracted_data["resume_url"] = resume_url_to_save
         print("[DEBUG] Resume processed successfully.")
 
         # Store in vector DB
