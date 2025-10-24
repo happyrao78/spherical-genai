@@ -63,28 +63,43 @@ app.get('/', (req, res) => {
   res.send('Server is running');
 });
 
-// --- MongoDB Connection ---
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('MongoDB connected successfully.'))
-  .catch(err => {
-    console.error('MongoDB connection error:', err.message);
-    // Exit process on critical connection error during startup?
-    // process.exit(1);
-  });
-
-mongoose.connection.on('error', err => {
-  console.error(`MongoDB runtime error: ${err.message}`);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.warn('MongoDB disconnected.');
-});
-
-// --- Server Startup ---
+// --- MongoDB Connection and Server Startup ---
+// Start the server only after a successful MongoDB connection to avoid Mongoose buffering/timeouts.
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => { // Listen on 0.0.0.0 to be accessible externally
-  console.log(`Server running smoothly on port ${PORT}`);
-});
+
+async function startServer() {
+  try {
+    if (!process.env.MONGODB_URI) {
+      throw new Error('MONGODB_URI environment variable is not set');
+    }
+
+    // Optional Mongoose settings can be set here
+    // Disable mongoose buffering of commands to fail fast if DB is down
+    mongoose.set('bufferCommands', false);
+
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('MongoDB connected successfully.');
+
+    // Attach runtime listeners
+    mongoose.connection.on('error', err => {
+      console.error(`MongoDB runtime error: ${err.message}`);
+    });
+
+    mongoose.connection.on('disconnected', () => {
+      console.warn('MongoDB disconnected.');
+    });
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running smoothly on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server due to MongoDB connection error:', err.message || err);
+    // Exit so the platform (e.g., Vercel/PM2) can restart or surface the failure
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // --- Graceful Shutdown (Optional but Recommended) ---
 process.on('SIGINT', async () => {
