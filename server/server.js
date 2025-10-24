@@ -48,7 +48,7 @@ app.use(cors({
 }));
 
 // Ensure preflight (OPTIONS) requests are handled and return the CORS headers
-app.options('*', (req, res) => {
+app.options('/*', (req, res) => {
   // Express + cors middleware will set necessary headers, just send 204
   res.sendStatus(204);
 });
