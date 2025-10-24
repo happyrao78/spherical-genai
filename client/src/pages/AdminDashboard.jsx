@@ -75,7 +75,9 @@ const AdminDashboard = () => {
     setSearchResults([]);
 
     try {
-      const res = await pythonAPI.post('/semantic-search', { query: searchQuery });
+      // Call the Node.js server proxy instead of calling the Python service directly
+      // This avoids CORS issues because the browser talks only to our domain
+      const res = await nodeAPI.post('/semantic-search', { query: searchQuery });
       setSearchResults(res.data.results || []);
       
       if (res.data.results.length === 0) {

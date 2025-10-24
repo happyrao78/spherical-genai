@@ -135,7 +135,8 @@ const Dashboard = () => {
     setSearching(true);
     setSearchResults([]);
     try {
-      const res = await pythonAPI.post('/semantic-search', { query: searchQuery });
+      // Use node proxy endpoint to avoid CORS issues with the external python service
+      const res = await nodeAPI.post('/semantic-search', { query: searchQuery });
       setSearchResults(res.data.results || []);
     } catch (error) {
       console.error('Search error:', error);

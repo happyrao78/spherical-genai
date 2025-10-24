@@ -9,11 +9,11 @@ from dotenv import load_dotenv
 import cloudinary
 import cloudinary.uploader
 
-from services.auth import verify_token
-from services.resume_processor import process_resume
-from services.vector_db import VectorDB
-from services.profile_manager import ProfileManager
-from services.semantic_search import SemanticSearch
+from service.services.auth import verify_token
+from service.services.resume_processor import process_resume
+from service.services.vector_db import VectorDB
+from service.services.profile_manager import ProfileManager
+from service.services.semantic_search import SemanticSearch
 
 
 load_dotenv()
@@ -39,6 +39,8 @@ origins = [
     "http://localhost:5174",  # Allow local admin development server
     "https://spherical-genai.vercel.app",  # Allow your deployed client app
     "https://spherical-genai-f6eq.vercel.app",  # Allow your deployed admin app
+    "https://spherical-genai-employer.vercel.app/login", 
+    "https://spherical-genai-candidate.vercel.app",
     # Add any other origins if needed
 ]
 
@@ -115,13 +117,15 @@ async def upload_resume(
             f.write(content)
         print(f"[DEBUG] File '{resume.filename}' saved locally.")
 
-        # Upload to Cloudinary
+        # Upload to Cloudinary using SIGNED upload (no preset needed)
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
-            resource_type="raw", # Use 'raw' for non-image files like PDFs
-            folder="resumes",
-            access_mode="public"
+            resource_type="raw",        # Important for PDFs
+            folder="resumes",           # Upload to 'resumes' folder
+            use_filename=True,          # Use original filename
+            unique_filename=True,       # Add unique identifier to prevent overwrites
+            overwrite=False             # Don't overwrite existing files
         )
 
         print("\n--- Cloudinary Upload Result ---")
@@ -139,7 +143,7 @@ async def upload_resume(
 
         # Process resume text
         extracted_data = process_resume(str(file_path))
-        extracted_data["resume_url"] = resume_url_to_save # Save the original URL
+        extracted_data["resume_url"] = resume_url_to_save
         print("[DEBUG] Resume processed successfully.")
 
         # Store in vector DB
