@@ -72,7 +72,8 @@ const Dashboard = () => {
   const fetchCandidates = async () => {
     try {
       const res = await nodeAPI.get('/admin/candidates-with-resumes');
-      setCandidates(res.data.candidates || []);
+      const fetchedCandidates = res.data.candidates || [];
+      setCandidates(fetchedCandidates);
     } catch (error) {
       console.error('Error fetching candidates:', error);
       setLoadingError('Could not load candidates list. Please try again later.');

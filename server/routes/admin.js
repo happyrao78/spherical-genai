@@ -14,7 +14,6 @@ router.use(adminOnly);
 
 // --- Application Routes (The only section with changes) ---
 router.get('/applications', async (req, res) => {
-  console.log("\n[SERVER] Received request for /admin/applications");
   try {
     let applicationFilter = {};
     if (req.user.email !== process.env.ADMIN_EMAIL) {
@@ -29,17 +28,14 @@ router.get('/applications', async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    console.log(`[SERVER-DEBUG] Found ${applications.length} applications in the database.`);
 
     // --- START: THE FIX ---
     if (applications.length > 0) {
       // 1. Get all the candidate IDs from the applications
       const candidateIds = applications.map(app => app.candidate?._id.toString()).filter(id => id);
-      console.log(`[SERVER-DEBUG] Extracted ${candidateIds.length} candidate IDs to find their profiles.`);
 
       // 2. Find all matching profiles in the 'profiles' collection
       const profiles = await Profile.find({ user_id: { $in: candidateIds } }).select('user_id resume_url').lean();
-      console.log(`[SERVER-DEBUG] Found ${profiles.length} profiles with resume URLs.`);
 
       // 3. Create a map for easy lookup (candidateId -> resumeUrl)
       const profileMap = profiles.reduce((map, profile) => {
@@ -52,7 +48,6 @@ router.get('/applications', async (req, res) => {
         const resumeUrl = app.candidate ? profileMap[app.candidate._id.toString()] || null : null;
         return { ...app, resumeUrl };
       });
-      console.log("[SERVER-DEBUG] Successfully merged resume URLs into the application data.");
     }
     // --- END: THE FIX ---
 
@@ -106,16 +101,13 @@ router.put('/applications/:id', async (req, res) => {
 
 
 router.get('/candidates-with-resumes', async (req, res) => {
-  console.log("\n[SERVER] Received request for /admin/candidates-with-resumes");
   try {
     // 1. Get user_ids from Python service (existing code)
     const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
     const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
     const userIdsFromPython = pythonRes.data || [];
-    console.log(`[SERVER-DEBUG] Fetched ${userIdsFromPython.length} user IDs with resumes from Python service.`);
 
     if (userIdsFromPython.length === 0) {
-      console.log("[SERVER-DEBUG] No user IDs found, returning empty candidates list.");
       return res.json({ candidates: [] });
     }
 
@@ -126,7 +118,6 @@ router.get('/candidates-with-resumes', async (req, res) => {
                                  .select('name email createdAt')
                                  .sort({ createdAt: -1 })
                                  .lean();
-    console.log(`[SERVER-DEBUG] Found ${candidates.length} User documents matching the IDs.`);
 
 
     // --- START: ADDED CODE TO FETCH RESUME URLS ---
@@ -134,7 +125,6 @@ router.get('/candidates-with-resumes', async (req, res) => {
     const profiles = await Profile.find({ user_id: { $in: userIdsFromPython } }) // Querying Profile model by user_id string
                                   .select('user_id resume_url')
                                   .lean();
-    console.log(`[SERVER-DEBUG] Found ${profiles.length} Profile documents with resume URLs.`);
 
     // 4. Create a map for easy lookup (userId -> resumeUrl)
     const profileMap = profiles.reduce((map, profile) => {
@@ -147,8 +137,6 @@ router.get('/candidates-with-resumes', async (req, res) => {
       ...candidate,
       resumeUrl: profileMap[candidate._id.toString()] || null // Convert candidate._id to string for lookup
     }));
-    console.log("[SERVER-DEBUG] Successfully merged resume URLs into candidates data.");
-    // --- END: ADDED CODE ---
 
     res.json({ candidates: candidatesWithResumes }); // Send the merged data
 
