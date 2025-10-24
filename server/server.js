@@ -47,11 +47,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
 
-// Ensure preflight (OPTIONS) requests are handled and return the CORS headers
-app.options('/*', (req, res) => {
-  // Express + cors middleware will set necessary headers, just send 204
-  res.sendStatus(204);
-});
 
 // --- Middleware ---
 app.use(express.json()); // Middleware to parse JSON bodies
