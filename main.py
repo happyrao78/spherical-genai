@@ -121,7 +121,7 @@ async def upload_resume(
         print("[DEBUG] Attempting to upload to Cloudinary...")
         upload_result = cloudinary.uploader.upload(
             str(file_path),
-            upload_preset="Genai-uploads",   # 🔹 your unsigned preset name
+            upload_preset="genai-uploads",   # 🔹 your unsigned preset name
             resource_type="raw",             # important for PDFs
             folder="resumes" 
         )
