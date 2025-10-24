@@ -47,4 +47,3 @@ RAILWAY BACKEND URL : https://web-production-1aa96.up.railway.app
 SERVER BACKEND URL : https://spherical-genai-xi.vercel.app
 CANDIDATE URL : https://spherical-genai-candidate.vercel.app/
 EMPLOYER URL : https://spherical-genai-employer.vercel.app/login
-
