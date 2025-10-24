@@ -149,16 +149,35 @@ router.get('/jobs', async (req, res) => {
 router.get('/candidates-with-resumes', async (req, res) => {
   console.log("\n[SERVER] Received request for /admin/candidates-with-resumes");
   try {
-    // 1. Get user_ids from Python service
-    const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
-    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Calling Python service at ${pythonApiUrl}/admin/resumes/user-ids`);
-    const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
-    const userIdsFromPython = pythonRes.data || [];
-    console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Fetched ${userIdsFromPython.length} user IDs from Python.`);
+    // 1. Get user_ids from Python service if configured.
+    const pythonApiUrl = process.env.VITE_PYTHON_API_URL; // do NOT default to localhost in production
+    let userIdsFromPython = [];
 
-    if (userIdsFromPython.length === 0) {
-      console.log("[SERVER-DEBUG] /admin/candidates-with-resumes: No user IDs from Python, returning empty list.");
-      return res.json({ candidates: [] });
+    if (pythonApiUrl) {
+      try {
+        console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Calling Python service at ${pythonApiUrl}/admin/resumes/user-ids`);
+        const pythonRes = await axios.get(`${pythonApiUrl.replace(/\/$/, '')}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
+        userIdsFromPython = pythonRes.data || [];
+        console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Fetched ${userIdsFromPython.length} user IDs from Python.`);
+      } catch (err) {
+        console.error('[SERVER-WARN] /admin/candidates-with-resumes: Error calling Python service, falling back to DB lookup.', err.message || err);
+        userIdsFromPython = [];
+      }
+    } else {
+      console.log('[SERVER-DEBUG] /admin/candidates-with-resumes: No Python API URL configured (VITE_PYTHON_API_URL). Falling back to DB lookup.');
+    }
+
+    // If python service returned none, fall back to distinct user_ids from Profile collection
+    if (!userIdsFromPython || userIdsFromPython.length === 0) {
+      console.log("[SERVER-DEBUG] /admin/candidates-with-resumes: No user IDs from Python; fetching distinct user_ids from Profile collection as fallback.");
+      try {
+        const distinctIds = await Profile.find({ resume_url: { $exists: true, $ne: '' } }).distinct('user_id');
+        userIdsFromPython = distinctIds.map(id => id.toString());
+        console.log(`[SERVER-DEBUG] /admin/candidates-with-resumes: Found ${userIdsFromPython.length} user IDs from Profile fallback.`);
+      } catch (err) {
+        console.error('[SERVER-ERROR] /admin/candidates-with-resumes: Error fetching distinct user_ids from Profile collection:', err.message || err);
+        return res.status(500).json({ message: 'Server error fetching candidates', error: err.message });
+      }
     }
 
     // 2. Fetch User details for these IDs
