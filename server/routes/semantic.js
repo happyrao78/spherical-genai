@@ -1,42 +1,56 @@
 const express = require('express');
 const axios = require('axios');
+const { protect, adminOnly } = require('../middleware/auth'); // Assuming auth middleware is needed
+require('dotenv').config(); // Ensure dotenv is configured if not done globally
 
 const router = express.Router();
 
-// Respond to preflight directly so the browser doesn't send OPTIONS to the upstream service
-router.options('/', (req, res) => {
-  // CORS middleware on app will set necessary headers; just respond 204
-  return res.sendStatus(204);
-});
+// Define the Python service URL (use environment variable, fallback to local)
+// Ensure SEMANTIC_SEARCH_URL is set in your .env or environment variables
+const pythonServiceUrl = process.env.SEMANTIC_SEARCH_URL || 'http://localhost:8000/api'; // Use '/api' prefix
 
-// Proxy POST / -> forwards to configured semantic search service to avoid CORS from the browser
-router.post('/', async (req, res) => {
-  try {
-    const target = process.env.SEMANTIC_SEARCH_URL || 'https://web-production-1aa96.up.railway.app/api/semantic-search';
+// Route to proxy semantic search requests to the Python service
+router.post('/', protect, adminOnly, async (req, res) => {
+    try {
+        const query = req.body.query;
 
-    // Basic request logging for debugging in prod
-    console.log(`[SEMANTIC-PROXY] Forwarding request to ${target}`);
-    const start = Date.now();
+        if (!query) {
+            return res.status(400).json({ message: 'Search query is required' });
+        }
 
-    // Forward the request body and authorization header
-    const response = await axios.post(target, req.body, {
-      headers: {
-        Authorization: req.headers.authorization || '',
-        'Content-Type': req.headers['content-type'] || 'application/json'
-      },
-      timeout: parseInt(process.env.SEMANTIC_SEARCH_TIMEOUT_MS || '60000', 10) // default 60s
-    });
+        // --- START DEBUG LOGGING ---
+        const headersToForward = {
+            'Authorization': req.headers.authorization, // Forward the original Authorization header
+            'Content-Type': 'application/json'
+        };
+        // --- END DEBUG LOGGING ---
 
-    console.log(`[SEMANTIC-PROXY] Upstream responded in ${Date.now() - start}ms with status ${response.status}`);
+        // Forward the request to the Python service
+        const response = await axios.post(
+            `${pythonServiceUrl}/semantic-search`, // Ensure this endpoint matches your Python API
+            { query }, // Send the query in the request body
+            {
+                headers: headersToForward // Send the captured headers
+            }
+        );
 
-    return res.status(response.status).json(response.data);
-  } catch (err) {
-    console.error('Error proxying semantic-search:', err.message || err, err.response ? err.response.data : '');
-    if (err.response) {
-      return res.status(err.response.status).json({ message: 'Upstream error', error: err.response.data });
+        // Send the Python service's response back to the client
+        res.json(response.data);
+
+    } catch (error) {
+        console.error('[SERVER-ERROR] Semantic Search Proxy Error:', error.response?.data || error.message);
+
+        // Forward the status code and message from the Python service if possible
+        if (error.response) {
+            res.status(error.response.status || 500).json({
+                message: error.response.data?.detail || error.response.data?.message || 'Error during semantic search via proxy',
+                proxyError: true
+            });
+        } else {
+            // General server error if no response from Python service
+            res.status(500).json({ message: 'Internal server error in proxy', error: error.message });
+        }
     }
-    return res.status(502).json({ message: 'Bad gateway', error: err.message });
-  }
 });
 
 module.exports = router;
