@@ -21,9 +21,10 @@ const formatUserResponse = (user) => {
 
 // Email transporter
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com', // Explicitly define the secure host
-  port: 465,              // Explicitly use the secure port
-  secure: true,           // Enforce SSL/TLS for port 465 connection
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Use false when port is 587 (or STARTTLS)
+  requireTLS: true, // Enforce TLS connection upgrade
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
