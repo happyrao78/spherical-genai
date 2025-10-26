@@ -129,7 +129,7 @@ router.get('/jobs', async (req, res) => {
 router.get('/candidates-with-resumes', async (req, res) => {
   try {
     // 1. Get user_ids from Python service (existing code)
-    const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
+    const pythonApiUrl = process.env.PYTHON_API_URL || 'http://localhost:8000/api';
     const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
     const userIdsFromPython = pythonRes.data || [];
     console.log(`[SERVER-DEBUG] Fetched ${userIdsFromPython.length} user IDs with resumes from Python service.`);
