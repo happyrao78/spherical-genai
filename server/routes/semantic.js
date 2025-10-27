@@ -7,7 +7,7 @@ const router = express.Router();
 
 // Define the Python service URL (use environment variable, fallback to local)
 // Ensure SEMANTIC_SEARCH_URL is set in your .env or environment variables
-const pythonServiceUrl = process.env.SEMANTIC_SEARCH_URL || 'http://localhost:8000/api'; // Use '/api' prefix
+const pythonServiceUrl = process.env.PYTHON_API_URL || 'http://localhost:8000/api'; // Use '/api' prefix
 
 // Route to proxy semantic search requests to the Python service
 router.post('/', protect, adminOnly, async (req, res) => {
