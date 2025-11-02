@@ -60,14 +60,28 @@ const Dashboard = () => {
   };
 
   const fetchApplications = async () => {
-    try {
-      const res = await nodeAPI.get('/admin/applications');
-      setApplications(res.data.applications || []);
-    } catch (error) {
-      console.error('Error fetching applications:', error);
-      setLoadingError('Could not load applications. Please try again later.');
-    }
-  };
+  try {
+    const res = await nodeAPI.get('/admin/applications');
+    let applications = res.data.applications || [];
+    
+    // Sort by match score (highest first), then by date (newest first)
+    applications.sort((a, b) => {
+      const scoreA = a.matchScore || 0;
+      const scoreB = b.matchScore || 0;
+      
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+      
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    
+    setApplications(applications);
+  } catch (error) {
+    console.error('Error fetching applications:', error);
+    setLoadingError('Could not load applications. Please try again later.');
+  }
+};
 
   const fetchCandidates = async () => {
     try {
