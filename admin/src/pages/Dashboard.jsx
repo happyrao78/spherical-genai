@@ -1,7 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
-import { Briefcase, Users, Search, LogOut, Plus, Loader, FileText, UserPlus, AlertCircle, ExternalLink } from 'lucide-react';
+import { 
+  Briefcase, Users, Search, LogOut, Plus, Loader, FileText, 
+  UserPlus, AlertCircle, ExternalLink, Edit, Trash2 // <-- Import new icons
+} from 'lucide-react';
+
+// --- NEW (Optional): Define initial form state ---
+const initialJobFormState = {
+  title: '',
+  company: '',
+  description: '',
+  role: '',
+  salary: '',
+  requirements: '',
+};
 
 const Dashboard = () => {
   const { admin, logout } = useAuth();
@@ -14,20 +27,19 @@ const Dashboard = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [showJobForm, setShowJobForm] = useState(false);
-  const [jobForm, setJobForm] = useState({
-    title: '',
-    company: '',
-    description: '',
-    role: '',
-    salary: '',
-    requirements: '',
-  });
+  
+  // --- MODIFIED: Use the initial state ---
+  const [jobForm, setJobForm] = useState(initialJobFormState);
+  
   const [newAdminForm, setNewAdminForm] = useState({
     name: '',
     email: '',
     password: '',
   });
   const [loadingError, setLoadingError] = useState('');
+
+  // --- NEW: State to track which job we are editing ---
+  const [editingJobId, setEditingJobId] = useState(null);
 
   useEffect(() => {
     setLoadingError('');
@@ -60,28 +72,28 @@ const Dashboard = () => {
   };
 
   const fetchApplications = async () => {
-  try {
-    const res = await nodeAPI.get('/admin/applications');
-    let applications = res.data.applications || [];
-    
-    // Sort by match score (highest first), then by date (newest first)
-    applications.sort((a, b) => {
-      const scoreA = a.matchScore || 0;
-      const scoreB = b.matchScore || 0;
+    try {
+      const res = await nodeAPI.get('/admin/applications');
+      let applications = res.data.applications || [];
       
-      if (scoreB !== scoreA) {
-        return scoreB - scoreA;
-      }
+      // Sort by match score (highest first), then by date (newest first)
+      applications.sort((a, b) => {
+        const scoreA = a.matchScore || 0;
+        const scoreB = b.matchScore || 0;
+        
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+        
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
       
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
-    
-    setApplications(applications);
-  } catch (error) {
-    console.error('Error fetching applications:', error);
-    setLoadingError('Could not load applications. Please try again later.');
-  }
-};
+      setApplications(applications);
+    } catch (error) {
+      console.error('Error fetching applications:', error);
+      setLoadingError('Could not load applications. Please try again later.');
+    }
+  };
 
   const fetchCandidates = async () => {
     try {
@@ -105,22 +117,78 @@ const Dashboard = () => {
     }
   };
 
-  const handleCreateJob = async (e) => {
+  // --- MODIFIED: Renamed from handleCreateJob to handleJobSubmit ---
+  const handleJobSubmit = async (e) => {
     e.preventDefault();
     if (!jobForm.title || !jobForm.company || !jobForm.description || !jobForm.role || !jobForm.salary) {
       alert('Please fill in all required job fields.');
       return;
     }
+
     try {
-      await nodeAPI.post('/admin/jobs', jobForm);
+      if (editingJobId) {
+        // --- This is an UPDATE (PUT) operation ---
+        await nodeAPI.put(`/admin/jobs/${editingJobId}`, jobForm);
+        alert('Job updated successfully!');
+      } else {
+        // --- This is a CREATE (POST) operation ---
+        await nodeAPI.post('/admin/jobs', jobForm);
+        alert('Job posted successfully!');
+      }
+
+      // --- Reset state after success ---
       setShowJobForm(false);
-      setJobForm({ title: '', company: '', description: '', role: '', salary: '', requirements: '' });
-      fetchJobs();
-      alert('Job posted successfully!');
+      setEditingJobId(null);
+      setJobForm(initialJobFormState);
+      fetchJobs(); // Refresh the jobs list
+
     } catch (error) {
-      console.error('Error creating job:', error);
-      alert(`Error creating job: ${error.response?.data?.message || 'Server error. Please check console.'}`);
+      console.error('Error submitting job:', error);
+      alert(`Error submitting job: ${error.response?.data?.message || 'Server error. Please check console.'}`);
     }
+  };
+
+  // --- NEW: Handler to start editing a job ---
+  const handleEditClick = (job) => {
+    // Set the editing ID
+    setEditingJobId(job._id);
+    
+    // Pre-populate the form with the job's data
+    setJobForm({
+      title: job.title,
+      company: job.company,
+      description: job.description,
+      role: job.role,
+      salary: job.salary,
+      requirements: job.requirements || '',
+    });
+    
+    // Open the form
+    setShowJobForm(true);
+
+    // Optional: Scroll to the top to see the form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // --- NEW: Handler to delete a job ---
+  const handleDeleteClick = async (jobId, jobTitle) => {
+    if (window.confirm(`Are you sure you want to delete the job: "${jobTitle}"? This will also delete all applications for this job.`)) {
+      try {
+        await nodeAPI.delete(`/admin/jobs/${jobId}`);
+        alert('Job deleted successfully!');
+        fetchJobs(); // Refresh the jobs list
+      } catch (error) {
+        console.error('Error deleting job:', error);
+        alert(`Error deleting job: ${error.response?.data?.message || 'Server error.'}`);
+      }
+    }
+  };
+  
+  // --- NEW: Handler to clean up state when canceling the form ---
+  const handleCancelJobForm = () => {
+    setShowJobForm(false);
+    setEditingJobId(null);
+    setJobForm(initialJobFormState);
   };
 
   const handleCreateAdmin = async (e) => {
@@ -242,17 +310,24 @@ const Dashboard = () => {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">Job Postings {admin?.isSuperAdmin ? '(All)' : '(My Postings)'}</h2>
               <button
-                onClick={() => setShowJobForm(!showJobForm)}
-                className="flex items-center bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+                // --- MODIFIED: Use the new cancel handler ---
+                onClick={() => showJobForm ? handleCancelJobForm() : setShowJobForm(true)}
+                className={`flex items-center text-white px-4 py-2 rounded-lg ${
+                  showJobForm ? 'bg-gray-500 hover:bg-gray-600' : 'bg-purple-600 hover:bg-purple-700'
+                }`}
               >
-                <Plus className="h-5 w-5 mr-2" />
+                <Plus className={`h-5 w-5 mr-2 ${showJobForm ? 'transform rotate-45' : ''}`} />
                 {showJobForm ? 'Cancel' : 'New Job'}
               </button>
             </div>
 
             {showJobForm && (
-              <form onSubmit={handleCreateJob} className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800">Create New Job Posting</h3>
+              // --- MODIFIED: Use handleJobSubmit ---
+              <form onSubmit={handleJobSubmit} className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                {/* --- MODIFIED: Dynamic form title --- */}
+                <h3 className="text-lg font-semibold mb-4 text-gray-800">
+                  {editingJobId ? 'Edit Job Posting' : 'Create New Job Posting'}
+                </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="jobTitle" className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
@@ -326,7 +401,8 @@ const Dashboard = () => {
                 <div className="mt-6 flex space-x-3 justify-end">
                   <button
                     type="button"
-                    onClick={() => setShowJobForm(false)}
+                    // --- MODIFIED: Use the new cancel handler ---
+                    onClick={handleCancelJobForm}
                     className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300"
                   >
                     Cancel
@@ -335,7 +411,8 @@ const Dashboard = () => {
                     type="submit"
                     className="bg-purple-600 text-white px-5 py-2 rounded-lg hover:bg-purple-700"
                   >
-                    Create Job
+                    {/* --- MODIFIED: Dynamic button text --- */}
+                    {editingJobId ? 'Update Job' : 'Create Job'}
                   </button>
                 </div>
               </form>
@@ -357,6 +434,26 @@ const Dashboard = () => {
                       <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">{job.role}</span>
                       <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">₹{job.salary}</span>
                     </div>
+
+                    {/* --- NEW: Edit and Delete Buttons --- */}
+                    <div className="mt-4 flex justify-end gap-3">
+                      <button
+                        onClick={() => handleEditClick(job)}
+                        className="flex items-center text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClick(job._id, job.title)}
+                        className="flex items-center text-sm text-red-600 hover:text-red-800"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </button>
+                    </div>
+                    {/* --- END: New Buttons --- */}
+
                   </div>
                 ))
               )}
@@ -492,7 +589,7 @@ const Dashboard = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {candidate.name}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td className="px-6 py-4 whitespace-nowGrap text-sm text-gray-500">
                             {candidate.email}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

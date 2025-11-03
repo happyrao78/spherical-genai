@@ -77,6 +77,8 @@ router.get('/applications', async (req, res) => {
 });
 
 // --- Job Routes ---
+
+// CREATE Job (POST) - (Already exists)
 router.post('/jobs', async (req, res) => {
   console.log("\n[SERVER] Received request POST /admin/jobs");
   try {
@@ -102,6 +104,7 @@ router.post('/jobs', async (req, res) => {
   }
 });
 
+// READ Jobs (GET) - (Already exists)
 router.get('/jobs', async (req, res) => {
   console.log("\n[SERVER] Received request GET /admin/jobs");
   try {
@@ -125,11 +128,100 @@ router.get('/jobs', async (req, res) => {
   }
 });
 
+// ==========================================================
+// ===== START: NEW CODE FOR JOB UPDATE (PUT) =====
+// ==========================================================
+router.put('/jobs/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title, company, description, role, salary, requirements } = req.body;
+  console.log(`\n[SERVER] Received request PUT /admin/jobs/${id}`);
+
+  try {
+    const job = await Job.findById(id);
+
+    if (!job) {
+      console.warn(`[SERVER-WARN] /admin/jobs/${id}: Job not found.`);
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Security Check: Allow if user is Super Admin OR user is the one who posted the job
+    const isSuperAdmin = req.user.email === process.env.ADMIN_EMAIL;
+    const isOwner = job.postedBy.toString() === req.user._id.toString();
+
+    if (!isSuperAdmin && !isOwner) {
+      console.warn(`[SERVER-WARN] /admin/jobs/${id}: Forbidden. User ${req.user.email} is not owner or super admin.`);
+      return res.status(403).json({ message: 'Not authorized to update this job' });
+    }
+    
+    // Update the job
+    const updatedJob = await Job.findByIdAndUpdate(
+      id,
+      { title, company, description, role, salary, requirements },
+      { new: true, runValidators: true } // Return the updated document and run schema validators
+    );
+
+    console.log(`[SERVER-INFO] /admin/jobs/${id}: Job updated successfully.`);
+    res.json({ message: 'Job updated successfully', job: updatedJob });
+
+  } catch (error) {
+    console.error(`[SERVER-ERROR] /admin/jobs/${id}:`, error);
+    res.status(500).json({ message: 'Server error updating job', error: error.message });
+  }
+});
+// ==========================================================
+// ===== END: NEW CODE FOR JOB UPDATE (PUT) =====
+// ==========================================================
+
+
+// ==========================================================
+// ===== START: NEW CODE FOR JOB DELETE (DELETE) =====
+// ==========================================================
+router.delete('/jobs/:id', async (req, res) => {
+  const { id } = req.params;
+  console.log(`\n[SERVER] Received request DELETE /admin/jobs/${id}`);
+
+  try {
+    const job = await Job.findById(id);
+
+    if (!job) {
+      console.warn(`[SERVER-WARN] /admin/jobs/${id}: Job not found.`);
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Security Check: Allow if user is Super Admin OR user is the one who posted the job
+    const isSuperAdmin = req.user.email === process.env.ADMIN_EMAIL;
+    const isOwner = job.postedBy.toString() === req.user._id.toString();
+
+    if (!isSuperAdmin && !isOwner) {
+      console.warn(`[SERVER-WARN] /admin/jobs/${id}: Forbidden. User ${req.user.email} is not owner or super admin.`);
+      return res.status(403).json({ message: 'Not authorized to delete this job' });
+    }
+
+    // Optional: Delete all applications for this job first
+    await Application.deleteMany({ job: id });
+    console.log(`[SERVER-DEBUG] /admin/jobs/${id}: Deleted associated applications.`);
+
+    // Delete the job
+    await Job.findByIdAndDelete(id);
+
+    console.log(`[SERVER-INFO] /admin/jobs/${id}: Job deleted successfully.`);
+    res.json({ message: 'Job deleted successfully' });
+
+  } catch (error) {
+    console.error(`[SERVER-ERROR] /admin/jobs/${id}:`, error);
+    res.status(500).json({ message: 'Server error deleting job', error: error.message });
+  }
+});
+// ==========================================================
+// ===== END: NEW CODE FOR JOB DELETE (DELETE) =====
+// ==========================================================
+
+
 // --- Candidate Info Route ---
 router.get('/candidates-with-resumes', async (req, res) => {
   try {
     // 1. Get user_ids from Python service (existing code)
-    const pythonApiUrl = process.env.PYTHON_API_URL || 'http://localhost:8000/api';
+    const pythonApiUrl = process.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api';
     const pythonRes = await axios.get(`${pythonApiUrl}/admin/resumes/user-ids`, { headers: { Authorization: req.headers.authorization } });
     const userIdsFromPython = pythonRes.data || [];
     console.log(`[SERVER-DEBUG] Fetched ${userIdsFromPython.length} user IDs with resumes from Python service.`);
