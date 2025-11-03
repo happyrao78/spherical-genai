@@ -113,7 +113,7 @@ async def upload_resume(
     try:
         # Save the file locally first
         with open(file_path, "wb") as f:
-            content = await resume.read()
+            content = await resume.read() 
             f.write(content)
         print(f"[DEBUG] File '{resume.filename}' saved locally.")
 

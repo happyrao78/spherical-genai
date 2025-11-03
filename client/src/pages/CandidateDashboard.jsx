@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
-import { Upload, FileText, Briefcase, User, LogOut, Edit, Check } from 'lucide-react';
+import { Upload, FileText, Briefcase, User, LogOut, Edit, Check, Loader, AlertCircle } from 'lucide-react';
 
 const CandidateDashboard = () => {
   const { user, logout } = useAuth();
@@ -9,53 +9,48 @@ const CandidateDashboard = () => {
   const [profile, setProfile] = useState(null);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [calculating, setCalculating] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({});
   const [loadingScores, setLoadingScores] = useState(false);
   const [appliedJobIds, setAppliedJobIds] = useState([]);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState(null);
 
   useEffect(() => {
     fetchProfile();
     fetchAppliedJobs();
   }, []);
 
-useEffect(() => {
+  useEffect(() => {
     if (profile) {
-      fetchJobsAndCalculateScores(); 
+      fetchJobsAndCalculateScores();
     } else {
-       fetchJobs(); 
+      fetchJobs();
     }
-  }, [profile]); 
-
-
+  }, [profile]);
 
   const fetchJobs = async () => {
-      // Fetches jobs without scores (used if no profile)
-      setLoadingScores(true); // Indicate loading
-      try {
-          const res = await nodeAPI.get('/jobs');
-          // Add matchScore: null or 0 initially if needed for consistent data structure
-          const jobsData = res.data.jobs.map(job => ({ ...job, matchScore: null }));
-          setJobs(jobsData);
-      } catch (error) {
-          console.error('Error fetching jobs:', error);
-      } finally {
-          setLoadingScores(false);
-      }
+    setLoadingScores(true);
+    try {
+      const res = await nodeAPI.get('/jobs');
+      const jobsData = res.data.jobs.map(job => ({ ...job, matchScore: null }));
+      setJobs(jobsData);
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+    } finally {
+      setLoadingScores(false);
+    }
   };
-
 
   const fetchJobsAndCalculateScores = async () => {
     setLoadingScores(true);
     try {
-      // 1. Fetch all jobs from Node.js
       const jobsRes = await nodeAPI.get('/jobs');
       let jobsData = jobsRes.data.jobs;
 
       if (jobsData && jobsData.length > 0) {
-        // 2. Prepare batch request payload
         const batchPayload = {
-          // No user_id needed here, Python service will use token
           jobs: jobsData.map(job => ({
             job_id: job._id,
             role: job.role,
@@ -64,39 +59,53 @@ useEffect(() => {
           })),
         };
 
-        // 3. Call the new batch endpoint in Python service
         const scoresRes = await pythonAPI.post('/calculate-batch-job-match', batchPayload);
-        const scoresData = scoresRes.data; // Expected: [{job_id: "...", matchScore: ...}]
+        const scoresData = scoresRes.data;
 
-        // 4. Create a map for quick score lookup
         const scoreMap = scoresData.reduce((map, item) => {
           map[item.job_id] = item.matchScore;
           return map;
         }, {});
 
-        // 5. Merge scores back into job data
+        // Cache scores in sessionStorage
+        sessionStorage.setItem('jobScores', JSON.stringify(scoreMap));
+
         jobsData = jobsData.map(job => ({
           ...job,
-          matchScore: scoreMap[job._id] !== undefined ? scoreMap[job._id] : 0, // Assign score or default to 0
+          matchScore: scoreMap[job._id] !== undefined ? scoreMap[job._id] : 0,
         }));
 
-        // 6. Sort jobs by score
         jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
       } else {
-          jobsData = []; // Ensure jobsData is an array
+        jobsData = [];
       }
 
-
-      setJobs(jobsData); // Update state with jobs having scores
+      setJobs(jobsData);
     } catch (error) {
       console.error('Error fetching jobs and scores:', error);
-      // Optionally fetch jobs without scores as a fallback
-       fetchJobs();
+      
+      // Try cached scores
+      const cachedScoresStr = sessionStorage.getItem('jobScores');
+      if (cachedScoresStr) {
+        try {
+          const cached = JSON.parse(cachedScoresStr);
+          const jobsRes = await nodeAPI.get('/jobs');
+          let jobsData = jobsRes.data.jobs.map(job => ({
+            ...job,
+            matchScore: cached[job._id] || 0
+          }));
+          jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+          setJobs(jobsData);
+        } catch (e) {
+          fetchJobs();
+        }
+      } else {
+        fetchJobs();
+      }
     } finally {
       setLoadingScores(false);
     }
   };
-
 
   const fetchAppliedJobs = async () => {
     try {
@@ -107,49 +116,28 @@ useEffect(() => {
     }
   };
 
-
-
-  const fetchJobsWithScores = async () => {
-    try {
-      setLoadingScores(true);
-      const res = await nodeAPI.get('/jobs');
-      const jobsData = res.data.jobs;
-      
-      // Calculate match scores for each job
-      const jobsWithScores = await Promise.all(
-        jobsData.map(async (job) => {
-          try {
-            const matchRes = await pythonAPI.post('/calculate-job-match', {
-              role: job.role,
-              description: job.description,
-              requirements: job.requirements || '',
-            });
-            return { ...job, matchScore: matchRes.data.matchScore || 0 };
-          } catch (error) {
-            console.error('Error calculating match for job:', job._id, error);
-            return { ...job, matchScore: 0 };
-          }
-        })
-      );
-      
-      // Sort by match score (highest first)
-      jobsWithScores.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-      
-      setJobs(jobsWithScores);
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-    } finally {
-      setLoadingScores(false);
-    }
-  };
-
-  const fetchProfile = async () => {
+  const fetchProfile = async (retryCount = 0) => {
+    setProfileLoading(true);
+    setProfileError(null);
+    
     try {
       const res = await pythonAPI.get('/profile');
       setProfile(res.data.profile);
       setEditData(res.data.profile || {});
+      setProfileLoading(false);
     } catch (error) {
       console.error('Error fetching profile:', error);
+      
+      // Retry with exponential backoff
+      if (retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        setTimeout(() => {
+          fetchProfile(retryCount + 1);
+        }, delay);
+      } else {
+        setProfileError('Unable to load profile. Please refresh the page.');
+        setProfileLoading(false);
+      }
     }
   };
 
@@ -165,20 +153,33 @@ useEffect(() => {
       await pythonAPI.post('/upload-resume', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      
+      setUploading(false);
+      setCalculating(true);
+      
       await fetchProfile();
+      await fetchJobsAndCalculateScores();
+      
       setFile(null);
       alert('Resume uploaded successfully!');
     } catch (error) {
-      alert('Error uploading resume');
+      console.error('Upload error:', error);
+      alert('Error uploading resume: ' + (error.response?.data?.detail || error.message));
     } finally {
       setUploading(false);
+      setCalculating(false);
     }
   };
 
   const handleApplyJob = async (jobId) => {
+    if (!profile) {
+      alert('Please upload your resume before applying to jobs.');
+      return;
+    }
+    
     try {
       await nodeAPI.post(`/jobs/${jobId}/apply`);
-      setAppliedJobIds([...appliedJobIds, jobId]);
+      setAppliedJobIds(prev => [...prev, jobId]);
       alert('Application submitted successfully!');
     } catch (error) {
       const errorMsg = error.response?.data?.message || 'Error applying to job';
@@ -191,6 +192,7 @@ useEffect(() => {
     try {
       await pythonAPI.put('/profile', editData);
       await fetchProfile();
+      await fetchJobsAndCalculateScores(); // Recalculate scores
       setEditMode(false);
       alert('Profile updated successfully!');
     } catch (error) {
@@ -203,6 +205,7 @@ useEffect(() => {
   };
 
   const getMatchColor = (score) => {
+    if (score === undefined || score === null) return 'text-gray-500';
     if (score >= 80) return 'text-green-600';
     if (score >= 60) return 'text-yellow-600';
     if (score >= 40) return 'text-orange-600';
@@ -210,6 +213,7 @@ useEffect(() => {
   };
 
   const getMatchBgColor = (score) => {
+    if (score === undefined || score === null) return 'bg-gray-300';
     if (score >= 80) return 'bg-green-600';
     if (score >= 60) return 'bg-yellow-600';
     if (score >= 40) return 'bg-orange-600';
@@ -238,6 +242,17 @@ useEffect(() => {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Calculating Indicator */}
+        {(loadingScores || calculating) && (
+          <div className="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded flex items-center">
+            <Loader className="h-5 w-5 animate-spin mr-3" />
+            <span>
+              {calculating ? 'Processing your resume and calculating match scores...' : 'Calculating match scores...'}
+              Please wait.
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Profile Section */}
           <div className="lg:col-span-1">
@@ -247,7 +262,7 @@ useEffect(() => {
                   <User className="h-5 w-5 mr-2" />
                   Profile
                 </h2>
-                {profile && (
+                {profile && !profileLoading && (
                   <button
                     onClick={() => setEditMode(!editMode)}
                     className="text-indigo-600 hover:text-indigo-700"
@@ -257,10 +272,50 @@ useEffect(() => {
                 )}
               </div>
 
-              {!profile ? (
+              {profileLoading ? (
+                <div className="flex items-center justify-center p-6">
+                  <Loader className="h-8 w-8 animate-spin text-indigo-600" />
+                  <span className="ml-2 text-gray-600">Loading profile...</span>
+                </div>
+              ) : profileError ? (
+                <div className="bg-red-50 border border-red-200 rounded p-4 text-red-700">
+                  <div className="flex items-start">
+                    <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Error</p>
+                      <p className="text-sm mt-1">{profileError}</p>
+                      <button
+                        onClick={() => fetchProfile(0)}
+                        className="mt-2 text-sm underline hover:no-underline"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : !profile ? (
                 <form onSubmit={handleFileUpload} className="space-y-4">
+                  {/* AI Disclaimer */}
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm font-medium text-yellow-800">
+                          AI-Generated Information
+                        </p>
+                        <p className="mt-1 text-sm text-yellow-700">
+                          Profile information is automatically extracted using AI. Please review and verify all details for accuracy.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  
                   <p className="text-gray-600">Upload your resume to get started</p>
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-indigo-400 transition-colors">
                     <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <input
                       type="file"
@@ -271,52 +326,90 @@ useEffect(() => {
                     />
                     <label
                       htmlFor="resume-upload"
-                      className="cursor-pointer text-indigo-600 hover:text-indigo-700"
+                      className="cursor-pointer text-indigo-600 hover:text-indigo-700 font-medium"
                     >
                       Choose PDF or DOCX file
                     </label>
-                    {file && <p className="mt-2 text-sm text-gray-600">{file.name}</p>}
+                    {file && (
+                      <p className="mt-2 text-sm text-gray-600">
+                        Selected: {file.name}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="submit"
                     disabled={!file || uploading}
-                    className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                    className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {uploading ? 'Uploading...' : 'Upload Resume'}
                   </button>
                 </form>
               ) : editMode ? (
                 <form onSubmit={handleUpdateProfile} className="space-y-4">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+                    <p className="text-xs text-yellow-800">
+                      <strong>Note:</strong> AI-extracted data. Please verify accuracy before saving.
+                    </p>
+                  </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
-                    <input
-                      type="text"
+                    <textarea
                       value={editData.skills || ''}
                       onChange={(e) => setEditData({ ...editData, skills: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="Python, JavaScript, React"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      rows="2"
+                      placeholder="Python, JavaScript, React, etc."
                     />
                   </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Experience</label>
                     <textarea
                       value={editData.experience || ''}
                       onChange={(e) => setEditData({ ...editData, experience: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      rows="3"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      rows="5"
+                      placeholder="Describe your work experience..."
                     />
                   </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Years of Experience</label>
+                    <input
+                      type="text"
+                      value={editData.years_of_experience || ''}
+                      onChange={(e) => setEditData({ ...editData, years_of_experience: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="e.g., 5 years"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Education</label>
+                    <textarea
+                      value={editData.education || ''}
+                      onChange={(e) => setEditData({ ...editData, education: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      rows="3"
+                      placeholder="Your educational background..."
+                    />
+                  </div>
+                  
                   <div className="flex space-x-2">
                     <button
                       type="submit"
-                      className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700"
+                      className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors"
                     >
-                      Save
+                      Save Changes
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditMode(false)}
-                      className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
+                      onClick={() => {
+                        setEditMode(false);
+                        setEditData(profile || {});
+                      }}
+                      className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition-colors"
                     >
                       Cancel
                     </button>
@@ -324,24 +417,39 @@ useEffect(() => {
                 </form>
               ) : (
                 <div className="space-y-3">
+                  <div className="bg-blue-50 border border-blue-200 rounded p-2 mb-3">
+                    <p className="text-xs text-blue-800">
+                      ℹ️ Profile auto-generated by AI. Verify and edit if needed.
+                    </p>
+                  </div>
+                  
                   <div>
                     <h3 className="text-sm font-medium text-gray-500">Skills</h3>
-                    <p className="text-gray-900">{profile.skills || 'Not provided'}</p>
+                    <p className="text-gray-900 mt-1">{profile.skills || 'Not specified'}</p>
                   </div>
+                  
                   <div>
                     <h3 className="text-sm font-medium text-gray-500">Experience</h3>
-                    <p className="text-gray-900 text-sm">{profile.experience ? profile.experience.substring(0, 200) + '...' : 'Not provided'}</p>
+                    <p className="text-gray-900 text-sm mt-1">
+                      {profile.experience 
+                        ? (profile.experience.length > 200 
+                            ? profile.experience.substring(0, 200) + '...' 
+                            : profile.experience)
+                        : 'Not specified'}
+                    </p>
                   </div>
+                  
                   {profile.education && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-500">Education</h3>
-                      <p className="text-gray-900 text-sm">{profile.education}</p>
+                      <p className="text-gray-900 text-sm mt-1">{profile.education}</p>
                     </div>
                   )}
+                  
                   {profile.years_of_experience && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-500">Years of Experience</h3>
-                      <p className="text-gray-900">{profile.years_of_experience}</p>
+                      <p className="text-gray-900 mt-1">{profile.years_of_experience}</p>
                     </div>
                   )}
                 </div>
@@ -355,12 +463,11 @@ useEffect(() => {
               <h2 className="text-xl font-bold flex items-center mb-6">
                 <Briefcase className="h-5 w-5 mr-2" />
                 Available Jobs
-                {loadingScores && <span className="ml-2 text-sm text-gray-500">(Calculating match scores...)</span>}
               </h2>
 
               <div className="space-y-4">
                 {jobs.length === 0 ? (
-                  <p className="text-gray-600">No jobs available at the moment</p>
+                  <p className="text-gray-600 text-center py-8">No jobs available at the moment</p>
                 ) : (
                   jobs.map((job) => (
                     <div key={job._id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
@@ -369,7 +476,7 @@ useEffect(() => {
                           <h3 className="text-lg font-semibold text-gray-900">{job.title}</h3>
                           <p className="text-indigo-600 font-medium">{job.company}</p>
                         </div>
-                        {profile && job.matchScore !== undefined && (
+                        {profile && job.matchScore !== undefined && job.matchScore !== null && (
                           <div className="ml-4 text-center">
                             <div className={`text-2xl font-bold ${getMatchColor(job.matchScore)}`}>
                               {job.matchScore}%
@@ -379,7 +486,7 @@ useEffect(() => {
                         )}
                       </div>
 
-                      <p className="text-gray-600 mt-2">{job.description}</p>
+                      <p className="text-gray-600 mt-2 text-sm">{job.description}</p>
                       
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
@@ -390,7 +497,7 @@ useEffect(() => {
                         </span>
                       </div>
 
-                      {profile && job.matchScore !== undefined && (
+                      {profile && job.matchScore !== undefined && job.matchScore !== null && (
                         <div className="mt-3">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-medium text-gray-700">Eligibility Score</span>
@@ -402,7 +509,7 @@ useEffect(() => {
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2.5">
                             <div
-                              className={`h-2.5 rounded-full ${getMatchBgColor(job.matchScore)}`}
+                              className={`h-2.5 rounded-full transition-all ${getMatchBgColor(job.matchScore)}`}
                               style={{ width: `${job.matchScore}%` }}
                             />
                           </div>
@@ -420,9 +527,21 @@ useEffect(() => {
                       ) : (
                         <button
                           onClick={() => handleApplyJob(job._id)}
-                          className="mt-4 w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+                          disabled={!profile}
+                          className={`mt-4 w-full py-2 rounded-lg transition-colors flex items-center justify-center ${
+                            !profile 
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                              : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          }`}
                         >
-                          Apply Now
+                          {!profile ? (
+                            <>
+                              <Upload className="h-5 w-5 mr-2" />
+                              Upload Resume First
+                            </>
+                          ) : (
+                            'Apply Now'
+                          )}
                         </button>
                       )}
                     </div>
