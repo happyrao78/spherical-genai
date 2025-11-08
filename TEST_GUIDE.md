@@ -18,7 +18,7 @@ cd client
 npm install
 npm run dev
 # Should open on http://localhost:5173
-
+ 
 # Terminal 5 - Admin
 cd admin
 npm install
