@@ -44,14 +44,41 @@ const CandidateDashboard = () => {
   };
 
   const fetchJobsAndCalculateScores = async () => {
-    setLoadingScores(true);
-    try {
-      const jobsRes = await nodeAPI.get('/jobs');
-      let jobsData = jobsRes.data.jobs;
+  setLoadingScores(true);
+  try {
+    const jobsRes = await nodeAPI.get('/jobs');
+    let jobsData = jobsRes.data.jobs;
 
-      if (jobsData && jobsData.length > 0) {
+    if (jobsData && jobsData.length > 0) {
+      // Check for cached scores in sessionStorage
+      const cacheKey = `jobScores_${user._id}`;
+      const cachedScoresStr = sessionStorage.getItem(cacheKey);
+      let scoreMap = {};
+
+      if (cachedScoresStr) {
+        try {
+          const cachedData = JSON.parse(cachedScoresStr);
+          // Check if cache is less than 1 hour old
+          const cacheAge = Date.now() - (cachedData.timestamp || 0);
+          if (cacheAge < 3600000) { // 1 hour in milliseconds
+            console.log('[DEBUG] Using cached scores (age: ' + Math.round(cacheAge/60000) + ' minutes)');
+            scoreMap = cachedData.scores || {};
+          } else {
+            console.log('[DEBUG] Cache expired, recalculating scores');
+          }
+        } catch (e) {
+          console.warn('[DEBUG] Invalid cache data, will recalculate');
+        }
+      }
+
+      // If no valid cache or missing scores, calculate
+      const jobsNeedingScores = jobsData.filter(job => scoreMap[job._id] === undefined);
+      
+      if (jobsNeedingScores.length > 0) {
+        console.log(`[DEBUG] Calculating scores for ${jobsNeedingScores.length} jobs`);
+        
         const batchPayload = {
-          jobs: jobsData.map(job => ({
+          jobs: jobsNeedingScores.map(job => ({
             job_id: job._id,
             role: job.role,
             description: job.description,
@@ -62,50 +89,58 @@ const CandidateDashboard = () => {
         const scoresRes = await pythonAPI.post('/calculate-batch-job-match', batchPayload);
         const scoresData = scoresRes.data;
 
-        const scoreMap = scoresData.reduce((map, item) => {
-          map[item.job_id] = item.matchScore;
-          return map;
-        }, {});
+        // Merge new scores with cached scores
+        scoresData.forEach(item => {
+          scoreMap[item.job_id] = item.matchScore;
+        });
 
-        // Cache scores in sessionStorage
-        sessionStorage.setItem('jobScores', JSON.stringify(scoreMap));
-
-        jobsData = jobsData.map(job => ({
-          ...job,
-          matchScore: scoreMap[job._id] !== undefined ? scoreMap[job._id] : 0,
+        // Update cache
+        sessionStorage.setItem(cacheKey, JSON.stringify({
+          scores: scoreMap,
+          timestamp: Date.now()
         }));
-
-        jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-      } else {
-        jobsData = [];
+        console.log('[DEBUG] Scores cached successfully');
       }
 
-      setJobs(jobsData);
-    } catch (error) {
-      console.error('Error fetching jobs and scores:', error);
-      
-      // Try cached scores
-      const cachedScoresStr = sessionStorage.getItem('jobScores');
-      if (cachedScoresStr) {
-        try {
-          const cached = JSON.parse(cachedScoresStr);
-          const jobsRes = await nodeAPI.get('/jobs');
-          let jobsData = jobsRes.data.jobs.map(job => ({
-            ...job,
-            matchScore: cached[job._id] || 0
-          }));
-          jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-          setJobs(jobsData);
-        } catch (e) {
-          fetchJobs();
-        }
-      } else {
+      // Apply scores to jobs
+      jobsData = jobsData.map(job => ({
+        ...job,
+        matchScore: scoreMap[job._id] !== undefined ? scoreMap[job._id] : 0,
+      }));
+
+      jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+    } else {
+      jobsData = [];
+    }
+
+    setJobs(jobsData);
+  } catch (error) {
+    console.error('Error fetching jobs and scores:', error);
+    
+    // Fallback to cached scores on error
+    const cacheKey = `jobScores_${user._id}`;
+    const cachedScoresStr = sessionStorage.getItem(cacheKey);
+    if (cachedScoresStr) {
+      try {
+        const cached = JSON.parse(cachedScoresStr);
+        const jobsRes = await nodeAPI.get('/jobs');
+        let jobsData = jobsRes.data.jobs.map(job => ({
+          ...job,
+          matchScore: cached.scores[job._id] || 0
+        }));
+        jobsData.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+        setJobs(jobsData);
+        console.log('[DEBUG] Using cached scores due to calculation error');
+      } catch (e) {
         fetchJobs();
       }
-    } finally {
-      setLoadingScores(false);
+    } else {
+      fetchJobs();
     }
-  };
+  } finally {
+    setLoadingScores(false);
+  }
+};
 
   const fetchAppliedJobs = async () => {
     try {
@@ -158,6 +193,7 @@ const CandidateDashboard = () => {
       setCalculating(true);
       
       await fetchProfile();
+      sessionStorage.removeItem(`jobScores_${user._id}`);
       await fetchJobsAndCalculateScores();
       
       setFile(null);
@@ -188,17 +224,23 @@ const CandidateDashboard = () => {
   };
 
   const handleUpdateProfile = async (e) => {
-    e.preventDefault();
-    try {
-      await pythonAPI.put('/profile', editData);
-      await fetchProfile();
-      await fetchJobsAndCalculateScores(); // Recalculate scores
-      setEditMode(false);
-      alert('Profile updated successfully!');
-    } catch (error) {
-      alert('Error updating profile');
-    }
-  };
+  e.preventDefault();
+  try {
+    await pythonAPI.put('/profile', editData);
+    await fetchProfile();
+    
+    // IMPORTANT: Clear score cache when profile changes
+    const cacheKey = `jobScores_${user._id}`;
+    sessionStorage.removeItem(cacheKey);
+    console.log('[DEBUG] Score cache cleared after profile update');
+    
+    await fetchJobsAndCalculateScores(); // Recalculate with new profile
+    setEditMode(false);
+    alert('Profile updated successfully!');
+  } catch (error) {
+    alert('Error updating profile');
+  }
+};
 
   const isJobApplied = (jobId) => {
     return appliedJobIds.includes(jobId);

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { nodeAPI, pythonAPI } from '../config/api';
-import { 
-  Briefcase, Users, Search, LogOut, Plus, Loader, FileText, 
-  UserPlus, AlertCircle, ExternalLink, Edit, Trash2 // <-- Import new icons
+import {
+  Briefcase, Users, Search, LogOut, Plus, Loader, FileText,
+  UserPlus, AlertCircle, ExternalLink, Edit, Trash2, RefreshCw // <-- Import new icons
 } from 'lucide-react';
 
 // --- NEW (Optional): Define initial form state ---
@@ -27,10 +27,10 @@ const Dashboard = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [showJobForm, setShowJobForm] = useState(false);
-  
+
   // --- MODIFIED: Use the initial state ---
   const [jobForm, setJobForm] = useState(initialJobFormState);
-  
+
   const [newAdminForm, setNewAdminForm] = useState({
     name: '',
     email: '',
@@ -75,19 +75,19 @@ const Dashboard = () => {
     try {
       const res = await nodeAPI.get('/admin/applications');
       let applications = res.data.applications || [];
-      
+
       // Sort by match score (highest first), then by date (newest first)
       applications.sort((a, b) => {
         const scoreA = a.matchScore || 0;
         const scoreB = b.matchScore || 0;
-        
+
         if (scoreB !== scoreA) {
           return scoreB - scoreA;
         }
-        
+
         return new Date(b.createdAt) - new Date(a.createdAt);
       });
-      
+
       setApplications(applications);
     } catch (error) {
       console.error('Error fetching applications:', error);
@@ -152,7 +152,7 @@ const Dashboard = () => {
   const handleEditClick = (job) => {
     // Set the editing ID
     setEditingJobId(job._id);
-    
+
     // Pre-populate the form with the job's data
     setJobForm({
       title: job.title,
@@ -162,7 +162,7 @@ const Dashboard = () => {
       salary: job.salary,
       requirements: job.requirements || '',
     });
-    
+
     // Open the form
     setShowJobForm(true);
 
@@ -183,7 +183,18 @@ const Dashboard = () => {
       }
     }
   };
-  
+
+  const handleRefreshScore = async (applicationId) => {
+    try {
+      await nodeAPI.post(`/admin/applications/${applicationId}/recalculate-score`);
+      alert('Score refreshed successfully!');
+      fetchApplications(); // Reload applications
+    } catch (error) {
+      console.error('Error refreshing score:', error);
+      alert('Failed to refresh score');
+    }
+  };
+
   // --- NEW: Handler to clean up state when canceling the form ---
   const handleCancelJobForm = () => {
     setShowJobForm(false);
@@ -312,9 +323,8 @@ const Dashboard = () => {
               <button
                 // --- MODIFIED: Use the new cancel handler ---
                 onClick={() => showJobForm ? handleCancelJobForm() : setShowJobForm(true)}
-                className={`flex items-center text-white px-4 py-2 rounded-lg ${
-                  showJobForm ? 'bg-gray-500 hover:bg-gray-600' : 'bg-purple-600 hover:bg-purple-700'
-                }`}
+                className={`flex items-center text-white px-4 py-2 rounded-lg ${showJobForm ? 'bg-gray-500 hover:bg-gray-600' : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
               >
                 <Plus className={`h-5 w-5 mr-2 ${showJobForm ? 'transform rotate-45' : ''}`} />
                 {showJobForm ? 'Cancel' : 'New Job'}
@@ -493,15 +503,14 @@ const Dashboard = () => {
                       </div>
                       <div className="flex flex-col items-end space-y-1">
                         <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            app.status === 'accepted'
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${app.status === 'accepted'
                               ? 'bg-green-100 text-green-800'
                               : app.status === 'rejected'
-                              ? 'bg-red-100 text-red-800'
-                              : app.status === 'reviewed'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}
+                                ? 'bg-red-100 text-red-800'
+                                : app.status === 'reviewed'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-blue-100 text-blue-800'
+                            }`}
                         >
                           {app.status}
                         </span>
@@ -511,6 +520,14 @@ const Dashboard = () => {
                               {app.matchScore}%
                             </div>
                             <div className="text-xs text-gray-500">Match</div>
+                            <button
+                              onClick={() => handleRefreshScore(app._id)}
+                              className="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center justify-center"
+                              title="Recalculate score"
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              Refresh
+                            </button>
                           </div>
                         )}
                       </div>
@@ -523,10 +540,10 @@ const Dashboard = () => {
                             {app.matchScore >= 80
                               ? 'Excellent'
                               : app.matchScore >= 60
-                              ? 'Good'
-                              : app.matchScore >= 40
-                              ? 'Fair'
-                              : 'Low'}{' '}
+                                ? 'Good'
+                                : app.matchScore >= 40
+                                  ? 'Fair'
+                                  : 'Low'}{' '}
                             Match
                           </span>
                         </div>

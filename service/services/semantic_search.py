@@ -9,9 +9,21 @@ class SemanticSearch:
         self.vector_db = vector_db
         self.profile_manager = ProfileManager()
         
-        # Configure Gemini
+        # Configure Gemini with temperature=0 for deterministic outputs
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # CRITICAL FIX: Use generation_config with temperature=0 for consistent scores
+        self.generation_config = genai.GenerationConfig(
+            temperature=0,  # Makes outputs deterministic
+            top_p=1.0,
+            top_k=1,
+            max_output_tokens=10,  # We only need a number
+        )
+        
+        self.model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            generation_config=self.generation_config
+        )
     
     def search(self, query: str) -> List[Dict]:
         """
@@ -55,7 +67,7 @@ class SemanticSearch:
                 "experience": profile.get('experience', '')[:200],  # Preview
                 "education": profile.get('education', ''),
                 "years_experience": profile.get('years_of_experience', ''),
-                "resume_url": profile.get('resume_url', ''), # This line was missing
+                "resume_url": profile.get('resume_url', ''),
                 "vector_score": round(similarity_score * 100, 2),
                 "ai_relevancy": relevancy_score,
                 "final_score": round(combined_score * 100, 2),
@@ -70,6 +82,7 @@ class SemanticSearch:
     def calculate_ai_relevancy(self, query: str, profile: Dict) -> int:
         """
         Use Gemini to calculate exact relevancy (0-100)
+        With temperature=0 for consistent results
         """
         prompt = f"""You are an expert recruiter. Analyze if this candidate matches the requirement.
 
@@ -115,19 +128,28 @@ Respond with ONLY a number between 0-100. No explanation."""
             return 50  # Default score on error
     
     def calculate_job_match(self, profile: Dict, job_requirements: str) -> int:
-        """Calculate how well candidate matches a job"""
+        """
+        Calculate how well candidate matches a job
+        With temperature=0 for consistent results
+        """
         prompt = f"""You are an expert recruiter. Rate how well this candidate matches the job requirement.
 
-        JOB REQUIREMENT:
-            {job_requirements}
+JOB REQUIREMENT:
+{job_requirements}
 
-            CANDIDATE PROFILE:
-            - Skills: {profile.get('skills', 'Not specified')}
-            - Experience: {profile.get('experience', 'Not specified')[:300]}
-            - Education: {profile.get('education', 'Not specified')}
-            - Years: {profile.get('years_of_experience', 'Not specified')}
+CANDIDATE PROFILE:
+- Skills: {profile.get('skills', 'Not specified')}
+- Experience: {profile.get('experience', 'Not specified')[:300]}
+- Education: {profile.get('education', 'Not specified')}
+- Years: {profile.get('years_of_experience', 'Not specified')}
 
-            Rate 0-100. Respond with ONLY a number."""
+Rate 0-100. Consider:
+1. Skill match (most important)
+2. Experience relevance
+3. Education background
+4. Years of experience
+
+Respond with ONLY a number between 0-100."""
 
         try:
             response = self.model.generate_content(prompt)

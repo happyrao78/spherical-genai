@@ -345,4 +345,126 @@ router.get('/users/admins', superAdminOnly, async (req, res) => {
     res.status(500).json({ message: 'Server error fetching admins', error: error.message });
   }
 });
+
+// Recalculate match score for a specific application
+router.post('/applications/:id/recalculate-score', async (req, res) => {
+  const applicationId = req.params.id;
+  console.log(`\n[SERVER] POST /admin/applications/${applicationId}/recalculate-score`);
+
+  try {
+    const application = await Application.findById(applicationId)
+      .populate('candidate', '_id')
+      .populate('job', 'role description requirements');
+
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
+
+    // Check authorization (only if needed for non-super admin)
+    if (req.user.email !== process.env.ADMIN_EMAIL) {
+      const job = await Job.findById(application.job._id);
+      if (!job || job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'Not authorized' });
+      }
+    }
+
+    // Calculate fresh score
+    const pythonApiUrl = process.env.PYTHON_API_URL || 'http://localhost:8000/api';
+    const scorePayload = {
+      user_id: application.candidate._id.toString(),
+      job_data: {
+        role: application.job.role,
+        description: application.job.description,
+        requirements: application.job.requirements || ''
+      }
+    };
+
+    const scoreRes = await axios.post(
+      `${pythonApiUrl}/calculate-job-match`,
+      scorePayload,
+      { headers: { Authorization: req.headers.authorization }, timeout: 30000 }
+    );
+
+    const newScore = scoreRes.data.matchScore || 0;
+
+    // Update application with new score
+    application.matchScore = newScore;
+    await application.save();
+
+    console.log(`[SERVER-INFO] Score recalculated for application ${applicationId}: ${newScore}`);
+    res.json({ message: 'Score recalculated successfully', matchScore: newScore });
+
+  } catch (error) {
+    console.error(`[SERVER-ERROR] Error recalculating score:`, error);
+    res.status(500).json({ 
+      message: 'Error recalculating score', 
+      error: error.message 
+    });
+  }
+});
+
+// Bulk recalculate scores for all applications of a job
+router.post('/jobs/:jobId/recalculate-all-scores', async (req, res) => {
+  const jobId = req.params.jobId;
+  console.log(`\n[SERVER] POST /admin/jobs/${jobId}/recalculate-all-scores`);
+
+  try {
+    const job = await Job.findById(jobId);
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Check authorization
+    if (req.user.email !== process.env.ADMIN_EMAIL) {
+      if (job.postedBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'Not authorized' });
+      }
+    }
+
+    const applications = await Application.find({ job: jobId })
+      .populate('candidate', '_id');
+
+    console.log(`[SERVER-DEBUG] Found ${applications.length} applications to recalculate`);
+
+    const pythonApiUrl = process.env.PYTHON_API_URL || 'http://localhost:8000/api';
+    let successCount = 0;
+
+    for (const app of applications) {
+      try {
+        const scorePayload = {
+          user_id: app.candidate._id.toString(),
+          job_data: {
+            role: job.role,
+            description: job.description,
+            requirements: job.requirements || ''
+          }
+        };
+
+        const scoreRes = await axios.post(
+          `${pythonApiUrl}/calculate-job-match`,
+          scorePayload,
+          { headers: { Authorization: req.headers.authorization }, timeout: 30000 }
+        );
+
+        app.matchScore = scoreRes.data.matchScore || 0;
+        await app.save();
+        successCount++;
+      } catch (err) {
+        console.error(`[SERVER-ERROR] Failed to recalculate score for application ${app._id}:`, err.message);
+      }
+    }
+
+    console.log(`[SERVER-INFO] Recalculated ${successCount}/${applications.length} scores for job ${jobId}`);
+    res.json({ 
+      message: 'Scores recalculated', 
+      total: applications.length, 
+      success: successCount 
+    });
+
+  } catch (error) {
+    console.error(`[SERVER-ERROR] Error in bulk recalculation:`, error);
+    res.status(500).json({ message: 'Error recalculating scores', error: error.message });
+  }
+});
+
 module.exports = router;
